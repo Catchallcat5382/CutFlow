@@ -1,0 +1,272 @@
+<Window x:Class="CutFlow.SettingsWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:controls="clr-namespace:CutFlow.Controls"
+        xmlns:shell="clr-namespace:System.Windows.Shell;assembly=PresentationFramework"
+        Title="CutFlow Settings" Width="860" Height="680" MinWidth="760" MinHeight="590"
+        WindowStartupLocation="CenterOwner" WindowStyle="None" ResizeMode="CanResize"
+        Background="{DynamicResource WindowBrush}" UseLayoutRounding="True" SnapsToDevicePixels="True" ToolTipService.InitialShowDelay="220" ToolTipService.ShowDuration="12000">
+    <shell:WindowChrome.WindowChrome>
+        <shell:WindowChrome CaptionHeight="0" ResizeBorderThickness="6" CornerRadius="10" GlassFrameThickness="0" UseAeroCaptionButtons="False"/>
+    </shell:WindowChrome.WindowChrome>
+    <Border BorderBrush="{DynamicResource StrongLineBrush}" BorderThickness="1" CornerRadius="10" Background="{DynamicResource WindowBrush}" ClipToBounds="True">
+        <Grid>
+            <Grid.RowDefinitions><RowDefinition Height="48"/><RowDefinition Height="*"/><RowDefinition Height="64"/></Grid.RowDefinitions>
+
+            <Grid Grid.Row="0" Background="{DynamicResource TitleBrush}" MouseLeftButtonDown="Title_MouseLeftButtonDown">
+                <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="48"/></Grid.ColumnDefinitions>
+                <StackPanel Orientation="Horizontal" Margin="18,0" VerticalAlignment="Center">
+                    <TextBlock Text="Settings" FontSize="15" FontWeight="SemiBold"/>
+                    <TextBlock Text="  •  CutFlow" Foreground="{DynamicResource MutedBrush}" FontSize="12" VerticalAlignment="Center"/>
+                </StackPanel>
+                <Button Grid.Column="1" Style="{StaticResource FlatButton}" Content="×" FontSize="18" Click="Cancel_Click" ToolTip="Close settings"/>
+            </Grid>
+
+            <Grid Grid.Row="1">
+                <Grid.ColumnDefinitions><ColumnDefinition Width="190"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
+                <Border Grid.Column="0" Background="{DynamicResource PanelAltBrush}" BorderBrush="{DynamicResource LineBrush}" BorderThickness="0,0,1,0">
+                    <ListBox x:Name="SettingsNav" BorderThickness="0" Background="Transparent" Margin="10,14" SelectionChanged="SettingsNav_SelectionChanged" SelectedIndex="0">
+                        <ListBox.ItemContainerStyle>
+                            <Style TargetType="ListBoxItem">
+                                <Setter Property="Padding" Value="12,9"/>
+                                <Setter Property="Margin" Value="0,0,0,4"/>
+                                <Setter Property="HorizontalContentAlignment" Value="Stretch"/>
+                                <Setter Property="FontSize" Value="12.5"/>
+                                <Setter Property="FocusVisualStyle" Value="{x:Null}"/>
+                            </Style>
+                        </ListBox.ItemContainerStyle>
+                        <ListBoxItem Content="Appearance"/>
+                        <ListBoxItem Content="Controls"/>
+                        <ListBoxItem Content="Playback"/>
+                        <ListBoxItem Content="Editing"/>
+                        <ListBoxItem Content="Performance &amp; export"/>
+                        <ListBoxItem Content="App"/>
+                    </ListBox>
+                </Border>
+
+                <Grid Grid.Column="1" Margin="28,22,30,24">
+                    <ScrollViewer x:Name="AppearancePanel" VerticalScrollBarVisibility="Auto">
+                        <StackPanel>
+                            <TextBlock Text="Appearance" FontSize="24" FontWeight="SemiBold"/>
+                            <TextBlock Text="Choose how CutFlow looks. System follows the Windows app theme automatically." Foreground="{DynamicResource MutedBrush}" TextWrapping="Wrap" Margin="0,5,0,20"/>
+                            <Border Style="{StaticResource CardBorder}" Padding="18">
+                                <StackPanel>
+                                    <Grid>
+                                        <Grid.ColumnDefinitions><ColumnDefinition Width="190"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
+                                        <StackPanel><TextBlock Text="Theme" FontWeight="SemiBold"/><TextBlock Text="System is recommended." FontSize="12" Foreground="{DynamicResource MutedBrush}" Margin="0,3,0,0"/></StackPanel>
+                                        <ComboBox x:Name="ThemeCombo" Grid.Column="1" SelectionChanged="ThemeCombo_SelectionChanged">
+                                            <ComboBoxItem Content="System"/><ComboBoxItem Content="Light"/><ComboBoxItem Content="Dark"/><ComboBoxItem Content="Custom"/>
+                                        </ComboBox>
+                                    </Grid>
+                                    <Grid Margin="0,18,0,0">
+                                        <Grid.ColumnDefinitions><ColumnDefinition Width="190"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
+                                        <StackPanel><TextBlock Text="Startup window mode" FontWeight="SemiBold"/><TextBlock Text="Full Screen covers the entire monitor." FontSize="12" Foreground="{DynamicResource MutedBrush}" Margin="0,3,0,0"/></StackPanel>
+                                        <ComboBox x:Name="WindowModeCombo" Grid.Column="1">
+                                            <ComboBoxItem Content="Full Screen" Tag="FullScreen"/>
+                                            <ComboBoxItem Content="Borderless" Tag="Borderless"/>
+                                            <ComboBoxItem Content="Windowed" Tag="Windowed"/>
+                                        </ComboBox>
+                                    </Grid>
+                                    <Grid x:Name="RgbPanel" Margin="0,18,0,0">
+                                        <Grid.ColumnDefinitions><ColumnDefinition Width="190"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
+                                        <StackPanel>
+                                            <TextBlock Text="Custom background" FontWeight="SemiBold"/>
+                                            <TextBlock Text="Drag anywhere in the picker or enter exact RGB values." FontSize="12" Foreground="{DynamicResource MutedBrush}" Margin="0,3,18,0" TextWrapping="Wrap"/>
+                                        </StackPanel>
+                                        <StackPanel Grid.Column="1">
+                                            <controls:HsvColorPicker x:Name="CustomColorPicker" Height="190" ColorChanged="CustomColorPicker_ColorChanged"/>
+                                            <Grid Margin="0,12,0,0">
+                                                <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="12"/><ColumnDefinition Width="*"/><ColumnDefinition Width="12"/><ColumnDefinition Width="*"/><ColumnDefinition Width="48"/></Grid.ColumnDefinitions>
+                                                <StackPanel><TextBlock Text="R" FontSize="11" Foreground="{DynamicResource MutedBrush}" Margin="1,0,0,4"/><TextBox x:Name="RBox" MaxLength="3" TextChanged="Rgb_TextChanged"/></StackPanel>
+                                                <StackPanel Grid.Column="2"><TextBlock Text="G" FontSize="11" Foreground="{DynamicResource MutedBrush}" Margin="1,0,0,4"/><TextBox x:Name="GBox" MaxLength="3" TextChanged="Rgb_TextChanged"/></StackPanel>
+                                                <StackPanel Grid.Column="4"><TextBlock Text="B" FontSize="11" Foreground="{DynamicResource MutedBrush}" Margin="1,0,0,4"/><TextBox x:Name="BBox" MaxLength="3" TextChanged="Rgb_TextChanged"/></StackPanel>
+                                                <Border x:Name="ColorPreview" Grid.Column="5" CornerRadius="8" BorderBrush="{DynamicResource StrongLineBrush}" BorderThickness="1" Margin="10,15,0,0"/>
+                                            </Grid>
+                                        </StackPanel>
+                                    </Grid>
+                                    <Grid x:Name="SurfaceRgbPanel" Margin="0,22,0,0">
+                                        <Grid.ColumnDefinitions><ColumnDefinition Width="190"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
+                                        <StackPanel>
+                                            <TextBlock Text="Custom panels" FontWeight="SemiBold"/>
+                                            <TextBlock Text="Controls the editor cards, sidebar and other surfaces instead of forcing Custom mode back to dark gray." FontSize="12" Foreground="{DynamicResource MutedBrush}" Margin="0,3,18,0" TextWrapping="Wrap"/>
+                                        </StackPanel>
+                                        <StackPanel Grid.Column="1">
+                                            <controls:HsvColorPicker x:Name="SurfaceColorPicker" Height="150" ColorChanged="SurfaceColorPicker_ColorChanged"/>
+                                            <Grid Margin="0,12,0,0">
+                                                <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="12"/><ColumnDefinition Width="*"/><ColumnDefinition Width="12"/><ColumnDefinition Width="*"/><ColumnDefinition Width="48"/></Grid.ColumnDefinitions>
+                                                <StackPanel><TextBlock Text="R" FontSize="11" Foreground="{DynamicResource MutedBrush}" Margin="1,0,0,4"/><TextBox x:Name="SurfaceRBox" MaxLength="3" TextChanged="SurfaceRgb_TextChanged"/></StackPanel>
+                                                <StackPanel Grid.Column="2"><TextBlock Text="G" FontSize="11" Foreground="{DynamicResource MutedBrush}" Margin="1,0,0,4"/><TextBox x:Name="SurfaceGBox" MaxLength="3" TextChanged="SurfaceRgb_TextChanged"/></StackPanel>
+                                                <StackPanel Grid.Column="4"><TextBlock Text="B" FontSize="11" Foreground="{DynamicResource MutedBrush}" Margin="1,0,0,4"/><TextBox x:Name="SurfaceBBox" MaxLength="3" TextChanged="SurfaceRgb_TextChanged"/></StackPanel>
+                                                <Border x:Name="SurfaceColorPreview" Grid.Column="5" CornerRadius="8" BorderBrush="{DynamicResource StrongLineBrush}" BorderThickness="1" Margin="10,15,0,0"/>
+                                            </Grid>
+                                        </StackPanel>
+                                    </Grid>
+                                    <Button Style="{StaticResource BaseButton}" Content="Reset appearance" HorizontalAlignment="Left" Margin="0,20,0,0" Click="ResetAppearance_Click"/>
+                                </StackPanel>
+                            </Border>
+                        </StackPanel>
+                    </ScrollViewer>
+
+                    <ScrollViewer x:Name="PlaybackPanel" VerticalScrollBarVisibility="Auto" Visibility="Collapsed">
+                        <StackPanel>
+                            <TextBlock Text="Playback" FontSize="24" FontWeight="SemiBold"/>
+                            <TextBlock Text="Preview controls only. 100% volume is the source level and exports do not lower the source volume." Foreground="{DynamicResource MutedBrush}" TextWrapping="Wrap" Margin="0,5,0,20"/>
+                            <Border Style="{StaticResource CardBorder}" Padding="18">
+                                <StackPanel>
+                                    <Grid Margin="0,0,0,18">
+                                        <Grid.ColumnDefinitions><ColumnDefinition Width="190"/><ColumnDefinition Width="*"/><ColumnDefinition Width="58"/></Grid.ColumnDefinitions>
+                                        <StackPanel><TextBlock Text="Preview volume" FontWeight="SemiBold"/><TextBlock Text="100% = original" FontSize="12" Foreground="{DynamicResource MutedBrush}" Margin="0,3,0,0"/></StackPanel>
+                                        <Slider x:Name="VolumeSlider" Grid.Column="1" Minimum="0" Maximum="1" ValueChanged="VolumeSlider_ValueChanged"/>
+                                        <TextBlock x:Name="VolumeLabel" Grid.Column="2" HorizontalAlignment="Right" VerticalAlignment="Center" Foreground="{DynamicResource MutedBrush}"/>
+                                    </Grid>
+                                    <Grid Margin="0,0,0,18">
+                                        <Grid.ColumnDefinitions><ColumnDefinition Width="190"/><ColumnDefinition Width="*"/><ColumnDefinition Width="58"/></Grid.ColumnDefinitions>
+                                        <StackPanel><TextBlock Text="Rewind / fast-forward" FontWeight="SemiBold"/><TextBlock Text="Transport button jump" FontSize="12" Foreground="{DynamicResource MutedBrush}" Margin="0,3,0,0"/></StackPanel>
+                                        <Slider x:Name="SkipSlider" Grid.Column="1" Minimum="2" Maximum="15" TickFrequency="1" IsSnapToTickEnabled="True" ValueChanged="SkipSlider_ValueChanged"/>
+                                        <TextBlock x:Name="SkipLabel" Grid.Column="2" HorizontalAlignment="Right" VerticalAlignment="Center" Foreground="{DynamicResource MutedBrush}"/>
+                                    </Grid>
+                                    <CheckBox x:Name="FollowPlayheadCheck" Content="Follow the playhead automatically while the timeline is zoomed" Margin="0,0,0,14"/>
+                                    <Grid Margin="0,0,0,18">
+                                        <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+                                        <StackPanel>
+                                            <CheckBox x:Name="UiSoundsCheck" Content="Enable CutFlow interface sounds" ToolTip="Turn all custom CutFlow button, cut, scan, save and navigation sounds on or off."/>
+                                            <TextBlock Text="Independent from video audio. Turn this off to silence all CutFlow clicks, confirmations and completion sounds." FontSize="12" Foreground="{DynamicResource MutedBrush}" TextWrapping="Wrap" Margin="24,4,20,0"/>
+                                        </StackPanel>
+                                        <Button Grid.Column="1" Style="{StaticResource BaseButton}" Content="Test sound" VerticalAlignment="Center" Click="TestSound_Click"/>
+                                    </Grid>
+                                    <Button Style="{StaticResource BaseButton}" Content="Reset playback" HorizontalAlignment="Left" Click="ResetPlayback_Click"/>
+                                </StackPanel>
+                            </Border>
+                        </StackPanel>
+                    </ScrollViewer>
+
+                    <ScrollViewer x:Name="EditingPanel" VerticalScrollBarVisibility="Auto" Visibility="Collapsed">
+                        <StackPanel>
+                            <TextBlock Text="Editing" FontSize="24" FontWeight="SemiBold"/>
+                            <TextBlock Text="Defaults for newly imported projects. Each project can still be tuned from the editor." Foreground="{DynamicResource MutedBrush}" TextWrapping="Wrap" Margin="0,5,0,20"/>
+                            <Border Style="{StaticResource CardBorder}" Padding="18">
+                                <StackPanel>
+                                    <Grid Margin="0,0,0,18">
+                                        <Grid.ColumnDefinitions><ColumnDefinition Width="190"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
+                                        <StackPanel><TextBlock Text="Background noise" FontWeight="SemiBold"/><TextBlock Text="Starting detection profile" FontSize="12" Foreground="{DynamicResource MutedBrush}" Margin="0,3,0,0"/></StackPanel>
+                                        <ComboBox x:Name="NoiseCombo" Grid.Column="1"><ComboBoxItem Content="Balanced"/><ComboBoxItem Content="Noisy Room"/><ComboBoxItem Content="Voice Focus"/><ComboBoxItem Content="Keep Ambience"/></ComboBox>
+                                    </Grid>
+                                    <Grid Margin="0,0,0,18">
+                                        <Grid.ColumnDefinitions><ColumnDefinition Width="190"/><ColumnDefinition Width="*"/><ColumnDefinition Width="58"/></Grid.ColumnDefinitions>
+                                        <StackPanel><TextBlock Text="Autosave interval" FontWeight="SemiBold"/><TextBlock Text="Only saves when changed" FontSize="12" Foreground="{DynamicResource MutedBrush}" Margin="0,3,0,0"/></StackPanel>
+                                        <Slider x:Name="AutosaveSlider" Grid.Column="1" Minimum="15" Maximum="120" TickFrequency="15" IsSnapToTickEnabled="True" ValueChanged="AutosaveSlider_ValueChanged"/>
+                                        <TextBlock x:Name="AutosaveLabel" Grid.Column="2" HorizontalAlignment="Right" VerticalAlignment="Center" Foreground="{DynamicResource MutedBrush}"/>
+                                    </Grid>
+                                    <CheckBox x:Name="PreviewCutsCheck" Content="Preview committed cuts by default" Margin="0,0,0,18"/>
+                                    <Grid Margin="0,0,0,14">
+                                        <Grid.ColumnDefinitions><ColumnDefinition Width="190"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
+                                        <StackPanel><TextBlock Text="Timeline snapping" FontWeight="SemiBold"/><TextBlock Text="Snap near cut boundaries" FontSize="12" Foreground="{DynamicResource MutedBrush}" Margin="0,3,0,0"/></StackPanel>
+                                        <CheckBox x:Name="SnappingCheck" Grid.Column="1" Content="Enable snapping" VerticalAlignment="Center"/>
+                                    </Grid>
+                                    <Grid>
+                                        <Grid.ColumnDefinitions><ColumnDefinition Width="190"/><ColumnDefinition Width="*"/><ColumnDefinition Width="64"/></Grid.ColumnDefinitions>
+                                        <StackPanel><TextBlock Text="Snap distance" FontWeight="SemiBold"/><TextBlock Text="How close the playhead must be" FontSize="12" Foreground="{DynamicResource MutedBrush}" Margin="0,3,0,0"/></StackPanel>
+                                        <Slider x:Name="SnapThresholdSlider" Grid.Column="1" Minimum="0.02" Maximum="0.30" TickFrequency="0.01" ValueChanged="SnapThresholdSlider_ValueChanged"/>
+                                        <TextBlock x:Name="SnapThresholdLabel" Grid.Column="2" HorizontalAlignment="Right" VerticalAlignment="Center" Foreground="{DynamicResource MutedBrush}"/>
+                                    </Grid>
+                                    <Button Style="{StaticResource BaseButton}" Content="Reset editing" HorizontalAlignment="Left" Margin="0,18,0,0" Click="ResetEditing_Click"/>
+                                </StackPanel>
+                            </Border>
+                        </StackPanel>
+                    </ScrollViewer>
+
+                    <ScrollViewer x:Name="PerformancePanel" VerticalScrollBarVisibility="Auto" Visibility="Collapsed">
+                        <StackPanel>
+                            <TextBlock Text="Performance &amp; export" FontSize="24" FontWeight="SemiBold"/>
+                            <TextBlock Text="Keep the editor responsive and choose the starting values shown in the export window." Foreground="{DynamicResource MutedBrush}" TextWrapping="Wrap" Margin="0,5,0,20"/>
+                            <Border Style="{StaticResource CardBorder}" Padding="18">
+                                <StackPanel>
+                                    <Grid Margin="0,0,0,18">
+                                        <Grid.ColumnDefinitions><ColumnDefinition Width="190"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
+                                        <StackPanel><TextBlock Text="Editor refresh" FontWeight="SemiBold"/><TextBlock Text="30 Hz is recommended" FontSize="12" Foreground="{DynamicResource MutedBrush}" Margin="0,3,0,0"/></StackPanel>
+                                        <ComboBox x:Name="RefreshCombo" Grid.Column="1"><ComboBoxItem Content="20 Hz — lower CPU" Tag="20"/><ComboBoxItem Content="30 Hz — recommended" Tag="30"/><ComboBoxItem Content="45 Hz — smoother" Tag="45"/><ComboBoxItem Content="60 Hz — maximum" Tag="60"/></ComboBox>
+                                    </Grid>
+                                    <Grid Margin="0,0,0,18">
+                                        <Grid.ColumnDefinitions><ColumnDefinition Width="190"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
+                                        <StackPanel><TextBlock Text="Default export FPS" FontWeight="SemiBold"/><TextBlock Text="Can be changed per export" FontSize="12" Foreground="{DynamicResource MutedBrush}" Margin="0,3,0,0"/></StackPanel>
+                                        <ComboBox x:Name="ExportFpsCombo" Grid.Column="1"><ComboBoxItem Content="Original"/><ComboBoxItem Content="120"/><ComboBoxItem Content="60"/><ComboBoxItem Content="50"/><ComboBoxItem Content="30"/><ComboBoxItem Content="25"/><ComboBoxItem Content="24"/></ComboBox>
+                                    </Grid>
+                                    <Grid>
+                                        <Grid.ColumnDefinitions><ColumnDefinition Width="190"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
+                                        <StackPanel><TextBlock Text="Default resolution" FontWeight="SemiBold"/><TextBlock Text="Can be changed per export" FontSize="12" Foreground="{DynamicResource MutedBrush}" Margin="0,3,0,0"/></StackPanel>
+                                        <ComboBox x:Name="ExportResolutionCombo" Grid.Column="1"><ComboBoxItem Content="Original"/><ComboBoxItem Content="2160p"/><ComboBoxItem Content="1440p"/><ComboBoxItem Content="1080p"/><ComboBoxItem Content="720p"/><ComboBoxItem Content="480p"/></ComboBox>
+                                    </Grid>
+                                    <Button Style="{StaticResource BaseButton}" Content="Reset performance &amp; export" HorizontalAlignment="Left" Margin="0,18,0,0" Click="ResetPerformance_Click"/>
+                                </StackPanel>
+                            </Border>
+                        </StackPanel>
+                    </ScrollViewer>
+
+
+
+                    <ScrollViewer x:Name="AppPanel" VerticalScrollBarVisibility="Auto" Visibility="Collapsed">
+                        <StackPanel>
+                            <TextBlock Text="App" FontSize="24" FontWeight="SemiBold"/>
+                            <TextBlock Text="Installation, local data and maintenance." Foreground="{DynamicResource MutedBrush}" TextWrapping="Wrap" Margin="0,5,0,20"/>
+                            <Border Style="{StaticResource CardBorder}" Padding="18">
+                                <StackPanel>
+                                    <Grid Margin="0,0,0,14">
+                                        <Grid.ColumnDefinitions><ColumnDefinition Width="190"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
+                                        <StackPanel><TextBlock Text="Version" FontWeight="SemiBold"/><TextBlock Text="Installed CutFlow build" FontSize="12" Foreground="{DynamicResource MutedBrush}" Margin="0,3,0,0"/></StackPanel>
+                                        <TextBlock x:Name="AppVersionText" Grid.Column="1" VerticalAlignment="Center"/>
+                                    </Grid>
+                                    <Grid Margin="0,0,0,18">
+                                        <Grid.ColumnDefinitions><ColumnDefinition Width="190"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
+                                        <StackPanel><TextBlock Text="Install location" FontWeight="SemiBold"/><TextBlock Text="Where this CutFlow build is running from" FontSize="12" Foreground="{DynamicResource MutedBrush}" Margin="0,3,0,0"/></StackPanel>
+                                        <TextBlock x:Name="InstallLocationText" Grid.Column="1" VerticalAlignment="Center" TextWrapping="Wrap" Foreground="{DynamicResource MutedBrush}"/>
+                                    </Grid>
+                                    <StackPanel Orientation="Horizontal">
+                                        <Button Style="{StaticResource BaseButton}" Content="Open app data" Click="OpenAppData_Click" Margin="0,0,8,0"/>
+                                        <Button x:Name="UninstallButton" Style="{StaticResource BaseButton}" Content="Uninstall CutFlow…" Click="UninstallApp_Click"/>
+                                    </StackPanel>
+                                    <TextBlock x:Name="UninstallHintText" FontSize="12" Foreground="{DynamicResource MutedBrush}" TextWrapping="Wrap" Margin="0,12,0,0"/>
+                                </StackPanel>
+                            </Border>
+                        </StackPanel>
+                    </ScrollViewer>
+
+                    <ScrollViewer x:Name="ShortcutsPanel" VerticalScrollBarVisibility="Auto" Visibility="Collapsed">
+                        <StackPanel>
+                            <TextBlock Text="Controls" FontSize="24" FontWeight="SemiBold"/>
+                            <TextBlock Text="Click a key box, then press the shortcut you want. Modifier combinations such as Ctrl+Z and Shift+Left are supported." Foreground="{DynamicResource MutedBrush}" TextWrapping="Wrap" Margin="0,5,0,20"/>
+                            <Border Style="{StaticResource CardBorder}" Padding="18">
+                                <StackPanel>
+                                    <TextBlock Text="Keyboard bindings" FontWeight="SemiBold" FontSize="14" Margin="0,0,0,12"/>
+                                    <Grid Margin="0,0,0,8"><Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="210"/></Grid.ColumnDefinitions><TextBlock Text="Play / Pause" VerticalAlignment="Center"/><TextBox x:Name="PlayPauseKeyBox" Grid.Column="1" Tag="PlayPause" IsReadOnly="True" HorizontalContentAlignment="Center" PreviewKeyDown="KeyBindingBox_PreviewKeyDown" GotKeyboardFocus="KeyBindingBox_GotKeyboardFocus" ToolTip="Click, then press the new shortcut"/></Grid>
+                                    <Grid Margin="0,0,0,8"><Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="210"/></Grid.ColumnDefinitions><TextBlock Text="Step back one frame" VerticalAlignment="Center"/><TextBox x:Name="StepBackKeyBox" Grid.Column="1" Tag="StepBack" IsReadOnly="True" HorizontalContentAlignment="Center" PreviewKeyDown="KeyBindingBox_PreviewKeyDown" GotKeyboardFocus="KeyBindingBox_GotKeyboardFocus" ToolTip="Click, then press the new shortcut"/></Grid>
+                                    <Grid Margin="0,0,0,8"><Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="210"/></Grid.ColumnDefinitions><TextBlock Text="Step forward one frame" VerticalAlignment="Center"/><TextBox x:Name="StepForwardKeyBox" Grid.Column="1" Tag="StepForward" IsReadOnly="True" HorizontalContentAlignment="Center" PreviewKeyDown="KeyBindingBox_PreviewKeyDown" GotKeyboardFocus="KeyBindingBox_GotKeyboardFocus" ToolTip="Click, then press the new shortcut"/></Grid>
+                                    <Grid Margin="0,0,0,8"><Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="210"/></Grid.ColumnDefinitions><TextBlock Text="Rewind" VerticalAlignment="Center"/><TextBox x:Name="RewindKeyBox" Grid.Column="1" Tag="Rewind" IsReadOnly="True" HorizontalContentAlignment="Center" PreviewKeyDown="KeyBindingBox_PreviewKeyDown" GotKeyboardFocus="KeyBindingBox_GotKeyboardFocus" ToolTip="Click, then press the new shortcut"/></Grid>
+                                    <Grid Margin="0,0,0,8"><Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="210"/></Grid.ColumnDefinitions><TextBlock Text="Fast-forward" VerticalAlignment="Center"/><TextBox x:Name="FastForwardKeyBox" Grid.Column="1" Tag="FastForward" IsReadOnly="True" HorizontalContentAlignment="Center" PreviewKeyDown="KeyBindingBox_PreviewKeyDown" GotKeyboardFocus="KeyBindingBox_GotKeyboardFocus" ToolTip="Click, then press the new shortcut"/></Grid>
+                                    <Grid Margin="0,0,0,8"><Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="210"/></Grid.ColumnDefinitions><TextBlock Text="Cut selected" VerticalAlignment="Center"/><TextBox x:Name="CutKeyBox" Grid.Column="1" Tag="Cut" IsReadOnly="True" HorizontalContentAlignment="Center" PreviewKeyDown="KeyBindingBox_PreviewKeyDown" GotKeyboardFocus="KeyBindingBox_GotKeyboardFocus" ToolTip="Click, then press the new shortcut"/></Grid>
+                                    <Grid Margin="0,0,0,8"><Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="210"/></Grid.ColumnDefinitions><TextBlock Text="Keep selected" VerticalAlignment="Center"/><TextBox x:Name="KeepKeyBox" Grid.Column="1" Tag="Keep" IsReadOnly="True" HorizontalContentAlignment="Center" PreviewKeyDown="KeyBindingBox_PreviewKeyDown" GotKeyboardFocus="KeyBindingBox_GotKeyboardFocus" ToolTip="Click, then press the new shortcut"/></Grid>
+                                    <Grid Margin="0,0,0,8"><Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="210"/></Grid.ColumnDefinitions><TextBlock Text="Cut all pending" VerticalAlignment="Center"/><TextBox x:Name="CutAllKeyBox" Grid.Column="1" Tag="CutAll" IsReadOnly="True" HorizontalContentAlignment="Center" PreviewKeyDown="KeyBindingBox_PreviewKeyDown" GotKeyboardFocus="KeyBindingBox_GotKeyboardFocus" ToolTip="Click, then press the new shortcut"/></Grid>
+                                    <Grid Margin="0,0,0,8"><Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="210"/></Grid.ColumnDefinitions><TextBlock Text="Undo" VerticalAlignment="Center"/><TextBox x:Name="UndoKeyBox" Grid.Column="1" Tag="Undo" IsReadOnly="True" HorizontalContentAlignment="Center" PreviewKeyDown="KeyBindingBox_PreviewKeyDown" GotKeyboardFocus="KeyBindingBox_GotKeyboardFocus" ToolTip="Click, then press the new shortcut"/></Grid>
+                                    <Grid Margin="0,0,0,8"><Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="210"/></Grid.ColumnDefinitions><TextBlock Text="Redo" VerticalAlignment="Center"/><TextBox x:Name="RedoKeyBox" Grid.Column="1" Tag="Redo" IsReadOnly="True" HorizontalContentAlignment="Center" PreviewKeyDown="KeyBindingBox_PreviewKeyDown" GotKeyboardFocus="KeyBindingBox_GotKeyboardFocus" ToolTip="Click, then press the new shortcut"/></Grid>
+                                    <Grid Margin="0,0,0,8"><Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="210"/></Grid.ColumnDefinitions><TextBlock Text="Save" VerticalAlignment="Center"/><TextBox x:Name="SaveKeyBox" Grid.Column="1" Tag="Save" IsReadOnly="True" HorizontalContentAlignment="Center" PreviewKeyDown="KeyBindingBox_PreviewKeyDown" GotKeyboardFocus="KeyBindingBox_GotKeyboardFocus" ToolTip="Click, then press the new shortcut"/></Grid>
+                                    <Grid Margin="0,0,0,8"><Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="210"/></Grid.ColumnDefinitions><TextBlock Text="Export" VerticalAlignment="Center"/><TextBox x:Name="ExportKeyBox" Grid.Column="1" Tag="Export" IsReadOnly="True" HorizontalContentAlignment="Center" PreviewKeyDown="KeyBindingBox_PreviewKeyDown" GotKeyboardFocus="KeyBindingBox_GotKeyboardFocus" ToolTip="Click, then press the new shortcut"/></Grid>
+                                    <Grid Margin="0"><Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="210"/></Grid.ColumnDefinitions><TextBlock Text="Full screen" VerticalAlignment="Center"/><TextBox x:Name="FullScreenKeyBox" Grid.Column="1" Tag="FullScreen" IsReadOnly="True" HorizontalContentAlignment="Center" PreviewKeyDown="KeyBindingBox_PreviewKeyDown" GotKeyboardFocus="KeyBindingBox_GotKeyboardFocus" ToolTip="Click, then press the new shortcut"/></Grid>
+                                    <Button Style="{StaticResource BaseButton}" Content="Reset controls to defaults" HorizontalAlignment="Left" Margin="0,18,0,0" Click="ResetControls_Click"/>
+                                </StackPanel>
+                            </Border>
+                        </StackPanel>
+                    </ScrollViewer>
+                </Grid>
+            </Grid>
+
+            <Border Grid.Row="2" BorderBrush="{DynamicResource LineBrush}" BorderThickness="0,1,0,0" Background="{DynamicResource PanelBrush}">
+                <Grid Margin="18,0">
+                    <TextBlock Text="Settings are stored locally on this PC." Foreground="{DynamicResource MutedBrush}" VerticalAlignment="Center" FontSize="12"/>
+                    <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" VerticalAlignment="Center">
+                        <Button Style="{StaticResource BaseButton}" Content="Cancel" Margin="0,0,8,0" Click="Cancel_Click"/>
+                        <Button Style="{StaticResource PrimaryButton}" Content="Save settings" Click="Save_Click"/>
+                    </StackPanel>
+                </Grid>
+            </Border>
+        </Grid>
+    </Border>
+</Window>

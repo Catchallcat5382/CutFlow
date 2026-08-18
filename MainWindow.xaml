@@ -1,0 +1,496 @@
+<Window x:Class="CutFlow.MainWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:controls="clr-namespace:CutFlow.Controls"
+        xmlns:shell="clr-namespace:System.Windows.Shell;assembly=PresentationFramework"
+        Title="CutFlow" Width="1400" Height="880" MinWidth="980" MinHeight="650"
+        Background="{DynamicResource WindowBrush}" WindowStyle="None" ResizeMode="CanResize"
+        KeyDown="Window_KeyDown" AllowDrop="True" DragOver="Window_DragOver" Drop="Window_Drop"
+        StateChanged="Window_StateChanged" SizeChanged="Window_SizeChanged" UseLayoutRounding="True" SnapsToDevicePixels="True" ToolTipService.InitialShowDelay="220" ToolTipService.ShowDuration="12000">
+    <shell:WindowChrome.WindowChrome>
+        <shell:WindowChrome CaptionHeight="0" ResizeBorderThickness="6" CornerRadius="10" GlassFrameThickness="0" UseAeroCaptionButtons="False"/>
+    </shell:WindowChrome.WindowChrome>
+
+    <Border x:Name="AppFrame" BorderBrush="{DynamicResource StrongLineBrush}" BorderThickness="1" CornerRadius="10" Background="{DynamicResource WindowBrush}" ClipToBounds="True">
+        <Grid>
+            <Grid.RowDefinitions><RowDefinition Height="50"/><RowDefinition Height="*"/><RowDefinition Height="32"/></Grid.RowDefinitions>
+
+            <!-- Menu / title bar -->
+            <Grid x:Name="TopBar" Grid.Row="0" Background="{DynamicResource TitleBrush}" MouseLeftButtonDown="TitleBar_MouseLeftButtonDown">
+                <Grid.ColumnDefinitions><ColumnDefinition Width="Auto"/><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+                <StackPanel Grid.Column="0" Orientation="Horizontal" VerticalAlignment="Center" Margin="10,2,0,0">
+                    <Image x:Name="AppLogo" Source="Assets/CutFlow.png" Width="20" Height="20" Stretch="Uniform" Margin="0,0,7,0" ToolTip="CutFlow"/>
+                    <TextBlock Text="CutFlow" FontSize="14" FontWeight="SemiBold" VerticalAlignment="Center" Margin="0,0,12,0"/>
+                    <Border Width="1" Height="20" Background="{DynamicResource LineBrush}" Margin="0,0,5,0"/>
+
+                    <Button x:Name="FileMenuButton" Style="{StaticResource TopMenuButton}" Content="File" Click="TopMenuButton_Click">
+                        <Button.ContextMenu>
+                            <ContextMenu>
+                                <MenuItem Header="New Project" InputGestureText="Ctrl+N" Click="NewProject_Click"/>
+                                <MenuItem Header="Open Project…" InputGestureText="Ctrl+O" Click="OpenProject_Click"/>
+                                <MenuItem Header="Open Projects Folder" Click="OpenProjectsFolder_Click"/>
+                                <Separator/>
+                                <MenuItem Header="Save" InputGestureText="Ctrl+S" Click="Save_Click"/>
+                                <MenuItem Header="Save As…" InputGestureText="Ctrl+Shift+S" Click="SaveAs_Click"/>
+                                <Separator/>
+                                <MenuItem Header="Export Media…" InputGestureText="Ctrl+E" Click="ExportMedia_Click"/>
+                                <MenuItem Header="Export Project Package…" Click="ExportProjectPackage_Click"/>
+                                <Separator/>
+                                <MenuItem Header="Project Home" Click="Home_Click"/>
+                                <MenuItem Header="Exit" InputGestureText="Alt+F4" Click="Exit_Click"/>
+                            </ContextMenu>
+                        </Button.ContextMenu>
+                    </Button>
+
+                    <Button x:Name="EditMenuButton" Style="{StaticResource TopMenuButton}" Content="Edit" Click="TopMenuButton_Click">
+                        <Button.ContextMenu>
+                            <ContextMenu>
+                                <MenuItem x:Name="UndoMenuItem" Header="Undo" InputGestureText="Ctrl+Z" Click="Undo_Click"/>
+                                <MenuItem x:Name="RedoMenuItem" Header="Redo" InputGestureText="Ctrl+Y" Click="Redo_Click"/>
+                                <Separator/>
+                                <MenuItem Header="Cut selected" InputGestureText="Enter" Click="ApplySelectedCut_Click"/>
+                                <MenuItem Header="Keep / remove selected" InputGestureText="Backspace" Click="KeepSelected_Click"/>
+                                <MenuItem Header="Cut all marked regions" InputGestureText="Ctrl+Delete" Click="CutAll_Click"/>
+                                <Separator/>
+                                <MenuItem Header="Rename Project" Click="RenameCurrentProject_Click"/>
+                                <MenuItem Header="Settings…" Click="Settings_Click"/>
+                            </ContextMenu>
+                        </Button.ContextMenu>
+                    </Button>
+
+                    <Button x:Name="ViewMenuButton" Style="{StaticResource TopMenuButton}" Content="View" Click="TopMenuButton_Click">
+                        <Button.ContextMenu>
+                            <ContextMenu>
+                                <MenuItem Header="Zoom In" InputGestureText="Ctrl++" Click="ZoomIn_Click"/>
+                                <MenuItem Header="Zoom Out" InputGestureText="Ctrl+-" Click="ZoomOut_Click"/>
+                                <MenuItem Header="Fit Timeline" InputGestureText="Ctrl+0" Click="Fit_Click"/>
+                                <Separator/>
+                                <MenuItem x:Name="SidebarMenuItem" Header="Show Silence Panel" IsCheckable="True" IsChecked="True" Click="SidebarMenuItem_Click"/>
+                                <Separator/>
+                                <MenuItem x:Name="FullScreenModeMenuItem" Header="Full Screen" InputGestureText="F11" IsCheckable="True" Click="FullScreenMode_Click"/>
+                                <MenuItem x:Name="BorderlessModeMenuItem" Header="Borderless" IsCheckable="True" Click="BorderlessMode_Click"/>
+                                <MenuItem x:Name="WindowedModeMenuItem" Header="Windowed" IsCheckable="True" Click="WindowedMode_Click"/>
+                            </ContextMenu>
+                        </Button.ContextMenu>
+                    </Button>
+
+                    <Button x:Name="HelpMenuButton" Style="{StaticResource TopMenuButton}" Content="Help" Click="TopMenuButton_Click">
+                        <Button.ContextMenu>
+                            <ContextMenu>
+                                <MenuItem x:Name="StartTutorialMenuItem" Header="Start Tutorial" InputGestureText="F1" Click="StartTutorial_Click"/>
+                                <MenuItem Header="Open Crash Logs" Click="OpenCrashLogs_Click"/>
+                                <Separator/>
+                                <MenuItem Header="About CutFlow" Click="About_Click"/>
+                            </ContextMenu>
+                        </Button.ContextMenu>
+                    </Button>
+                </StackPanel>
+
+                <Grid Grid.Column="1" HorizontalAlignment="Center" VerticalAlignment="Center" Margin="12,2,12,0" MaxWidth="560">
+                    <TextBox x:Name="ProjectTitleBox" Text="Projects" Padding="7,4" MaxWidth="540" MinWidth="160"
+                             IsReadOnly="True" Background="Transparent" BorderBrush="Transparent" BorderThickness="1" FontSize="13" FontWeight="SemiBold"
+                             TextAlignment="Center" VerticalContentAlignment="Center" HorizontalScrollBarVisibility="Hidden" ToolTip="Click the project title to rename it"
+                             PreviewMouseLeftButtonDown="ProjectTitleBox_MouseLeftButtonDown" LostFocus="ProjectTitleBox_LostFocus" KeyDown="ProjectTitleBox_KeyDown"/>
+                </Grid>
+
+                <StackPanel Grid.Column="2" Orientation="Horizontal">
+                    <Button x:Name="TutorialButton" Style="{StaticResource IconButton}" ToolTip="Start tutorial (F1)" Click="StartTutorial_Click">
+                        <Grid Width="17" Height="17">
+                            <Ellipse Stroke="{DynamicResource InkBrush}" StrokeThickness="1.5"/>
+                            <TextBlock Text="?" Foreground="{DynamicResource InkBrush}" FontWeight="SemiBold" FontSize="12" HorizontalAlignment="Center" VerticalAlignment="Center" Margin="0,-1,0,0"/>
+                        </Grid>
+                    </Button>
+                    <Button Style="{StaticResource IconButton}" ToolTip="Settings" Click="Settings_Click">
+                        <Path Width="15" Height="15" Stretch="Uniform" Fill="{DynamicResource InkBrush}" Data="M12,2 L14,3 L14.7,5.1 L16.8,5.8 L18,5 L20,7 L19.2,8.2 L19.9,10.3 L22,11 L22,13 L19.9,13.7 L19.2,15.8 L20,17 L18,19 L16.8,18.2 L14.7,18.9 L14,21 L12,22 L10,21 L9.3,18.9 L7.2,18.2 L6,19 L4,17 L4.8,15.8 L4.1,13.7 L2,13 L2,11 L4.1,10.3 L4.8,8.2 L4,7 L6,5 L7.2,5.8 L9.3,5.1 L10,3 Z M12,8 A4,4 0 1 0 12,16 A4,4 0 1 0 12,8"/>
+                    </Button>
+                    <Button Style="{StaticResource FlatButton}" Width="44" Content="—" Click="Minimize_Click" ToolTip="Minimize"/>
+                    <Button Style="{StaticResource FlatButton}" Width="44" Content="□" Click="Maximize_Click" ToolTip="Maximize / restore"/>
+                    <Button Style="{StaticResource FlatButton}" Width="46" Content="×" FontSize="18" Click="Close_Click" ToolTip="Close"/>
+                </StackPanel>
+            </Grid>
+
+            <!-- Project home -->
+            <Grid x:Name="HomeView" Grid.Row="1" Margin="34,28,34,30">
+                <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="22"/><RowDefinition Height="*"/></Grid.RowDefinitions>
+                <Grid>
+                    <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+                    <StackPanel>
+                        <TextBlock Text="Your projects" FontSize="30" FontWeight="SemiBold"/>
+                        <TextBlock Text="CutFlow autosaves locally so you can close the app and continue where you left off." Foreground="{DynamicResource MutedBrush}" Margin="0,6,0,0" TextWrapping="Wrap"/>
+                    </StackPanel>
+                    <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center">
+                        <Button Style="{StaticResource FlatButton}" Content="Projects folder" Margin="0,0,9,0" Click="OpenProjectsFolder_Click" ToolTip="Open CutFlow's local project folders in File Explorer"/>
+                        <Button Style="{StaticResource BaseButton}" Content="Open saved project" Margin="0,0,9,0" Click="OpenProject_Click" ToolTip="Choose a .cutflow project from the CutFlow Projects folder"/>
+                        <Button x:Name="HomeNewProjectButton" Style="{StaticResource PrimaryButton}" Content="New project" Click="NewProject_Click"/>
+                    </StackPanel>
+                </Grid>
+
+                <Border Grid.Row="2" Style="{StaticResource CardBorder}" Padding="12">
+                    <Grid>
+                        <Grid.RowDefinitions><RowDefinition Height="44"/><RowDefinition Height="*"/></Grid.RowDefinitions>
+                        <Grid Margin="10,0">
+                            <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+                            <TextBlock Text="Recent projects" FontSize="15" FontWeight="SemiBold" VerticalAlignment="Center"/>
+                            <TextBlock Grid.Column="1" Text="Projects are stored in %LOCALAPPDATA%\CutFlow\Projects" Foreground="{DynamicResource MutedBrush}" FontSize="11.5" VerticalAlignment="Center"/>
+                        </Grid>
+                        <Grid Grid.Row="1">
+                            <ListBox x:Name="RecentProjectsList" BorderThickness="0" Background="Transparent" MouseDoubleClick="RecentProjectsList_MouseDoubleClick" ScrollViewer.VerticalScrollBarVisibility="Auto">
+                                <ListBox.ItemContainerStyle>
+                                    <Style TargetType="ListBoxItem"><Setter Property="HorizontalContentAlignment" Value="Stretch"/><Setter Property="Padding" Value="0"/><Setter Property="Margin" Value="0,0,0,7"/></Style>
+                                </ListBox.ItemContainerStyle>
+                                <ListBox.ItemTemplate>
+                                    <DataTemplate>
+                                        <Border Background="{DynamicResource PanelAltBrush}" BorderBrush="{DynamicResource LineBrush}" BorderThickness="1" CornerRadius="8" Padding="15,12">
+                                            <Grid>
+                                                <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="180"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+                                                <StackPanel MinWidth="0">
+                                                    <TextBlock Text="{Binding Name}" FontSize="14" FontWeight="SemiBold" TextTrimming="CharacterEllipsis"/>
+                                                    <TextBlock Text="{Binding SourceFileLabel}" FontSize="12" Foreground="{DynamicResource MutedBrush}" Margin="0,3,0,0" TextTrimming="CharacterEllipsis"/>
+                                                </StackPanel>
+                                                <StackPanel Grid.Column="1" VerticalAlignment="Center" Margin="12,0">
+                                                    <TextBlock Text="{Binding DetailsLabel}" FontSize="12" Foreground="{DynamicResource MutedBrush}" HorizontalAlignment="Right"/>
+                                                    <TextBlock Text="{Binding UpdatedLabel}" FontSize="11.5" Foreground="{DynamicResource MutedBrush}" HorizontalAlignment="Right" Margin="0,2,0,0"/>
+                                                </StackPanel>
+                                                <StackPanel Grid.Column="2" Orientation="Horizontal" VerticalAlignment="Center">
+                                                    <Button Style="{StaticResource FlatButton}" Content="Rename" Click="RecentRename_Click"/>
+                                                    <Button Style="{StaticResource FlatButton}" Content="Remove" Click="RecentRemove_Click"/>
+                                                    <Button Style="{StaticResource PrimaryButton}" Content="Open" Padding="14,5" Click="RecentOpen_Click"/>
+                                                </StackPanel>
+                                            </Grid>
+                                        </Border>
+                                    </DataTemplate>
+                                </ListBox.ItemTemplate>
+                            </ListBox>
+                            <StackPanel x:Name="HomeEmptyState" HorizontalAlignment="Center" VerticalAlignment="Center" Margin="20">
+                                <TextBlock Text="No projects yet" FontSize="20" FontWeight="SemiBold" HorizontalAlignment="Center"/>
+                                <TextBlock Text="Create a new project, choose your recording, and CutFlow will autosave it here." Foreground="{DynamicResource MutedBrush}" Margin="0,5,0,16" TextWrapping="Wrap" MaxWidth="460" TextAlignment="Center"/>
+                                <Button Style="{StaticResource PrimaryButton}" Content="New project" HorizontalAlignment="Center" Click="NewProject_Click"/>
+                            </StackPanel>
+                        </Grid>
+                    </Grid>
+                </Border>
+            </Grid>
+
+            <!-- Editor -->
+            <Grid x:Name="EditorView" Grid.Row="1" Visibility="Collapsed">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*" MinWidth="520"/>
+                    <ColumnDefinition x:Name="SplitterColumn" Width="5"/>
+                    <ColumnDefinition x:Name="SidebarColumn" Width="355" MinWidth="285" MaxWidth="470"/>
+                </Grid.ColumnDefinitions>
+
+                <Grid Grid.Column="0" Margin="12,9,7,11">
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="*" MinHeight="170"/>
+                        <RowDefinition Height="58"/>
+                        <RowDefinition Height="5"/>
+                        <RowDefinition Height="245" MinHeight="170"/>
+                    </Grid.RowDefinitions>
+
+                    <Grid Grid.Row="0" Margin="3,0,3,8" MinHeight="28">
+                        <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+                        <StackPanel Grid.Column="0" Orientation="Horizontal" MinWidth="0">
+                            <TextBlock x:Name="MediaNameLabel" Text="No media" FontWeight="SemiBold" TextTrimming="CharacterEllipsis" VerticalAlignment="Center" MaxWidth="480" ToolTip="Source media file"/>
+                            <TextBlock x:Name="MediaInfoLabel" Foreground="{DynamicResource MutedBrush}" Margin="10,0,0,0" VerticalAlignment="Center" TextTrimming="CharacterEllipsis" MaxWidth="260"/>
+                        </StackPanel>
+                        <TextBlock x:Name="TimelineSummary" Grid.Column="1" VerticalAlignment="Center" Foreground="{DynamicResource MutedBrush}" Text="No media" TextTrimming="CharacterEllipsis" MaxWidth="310" Margin="12,0,0,0"/>
+                    </Grid>
+
+                    <Border Grid.Row="1" Background="{DynamicResource PreviewBrush}" BorderBrush="{DynamicResource LineBrush}" BorderThickness="1" CornerRadius="9" ClipToBounds="True">
+                        <Grid>
+                            <MediaElement x:Name="Preview" LoadedBehavior="Manual" UnloadedBehavior="Manual" Stretch="Uniform" ScrubbingEnabled="True" Volume="1" IsMuted="False" Balance="0" MediaOpened="Preview_MediaOpened" MediaEnded="Preview_MediaEnded" MediaFailed="Preview_MediaFailed"/>
+                            <Grid x:Name="EditorEmptyState" Background="{DynamicResource PanelAltBrush}">
+                                <StackPanel HorizontalAlignment="Center" VerticalAlignment="Center" Margin="20">
+                                    <TextBlock Text="Create a project" FontSize="24" FontWeight="SemiBold" HorizontalAlignment="Center"/>
+                                    <TextBlock Text="CutFlow analyzes pauses locally, then lets you commit the cuts you actually want." Foreground="{DynamicResource MutedBrush}" Margin="0,8,0,18" TextWrapping="Wrap" TextAlignment="Center" MaxWidth="520"/>
+                                    <Button Style="{StaticResource PrimaryButton}" Content="New project" HorizontalAlignment="Center" Click="NewProject_Click"/>
+                                </StackPanel>
+                            </Grid>
+                        </Grid>
+                    </Border>
+
+                    <Grid Grid.Row="2" Margin="3,0" MinWidth="0">
+                        <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
+                        <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                            <TextBox x:Name="TimeLabel" Text="0:00.00" Width="86" Padding="7,5" VerticalContentAlignment="Center" TextAlignment="Center" ToolTip="Current playhead time. Click, type a timestamp, then press Enter." KeyDown="TimeLabel_KeyDown" LostKeyboardFocus="TimeLabel_LostKeyboardFocus"/>
+                            <TextBlock Text="/" Foreground="{DynamicResource MutedBrush}" Margin="7,0" VerticalAlignment="Center"/>
+                            <TextBlock x:Name="TotalTimeLabel" Text="0:00.00" Foreground="{DynamicResource MutedBrush}" VerticalAlignment="Center"/>
+                        </StackPanel>
+
+                        <StackPanel Grid.Column="1" Orientation="Horizontal" HorizontalAlignment="Center" VerticalAlignment="Center">
+                            <Button x:Name="RewindButton" Style="{StaticResource IconButton}" ToolTip="Rewind" Click="Rewind_Click">
+                                <Path Width="19" Height="16" Stretch="Uniform" Fill="{DynamicResource InkBrush}" Data="M13,3 L6,8 L13,13 Z M21,3 L14,8 L21,13 Z"/>
+                            </Button>
+                            <Button x:Name="PlayButton" Style="{StaticResource BaseButton}" Width="48" Height="40" Padding="10" ToolTip="Play / pause (Space)" Click="Play_Click" Margin="4,0">
+                                <Grid Width="18" Height="18">
+                                    <Path x:Name="PlayGlyph" Stretch="Uniform" Fill="{DynamicResource InkBrush}" Data="M5,2 L17,9 L5,16 Z"/>
+                                    <Path x:Name="PauseGlyph" Visibility="Collapsed" Stretch="Uniform" Fill="{DynamicResource InkBrush}" Data="M4,2 H8 V16 H4 Z M12,2 H16 V16 H12 Z"/>
+                                </Grid>
+                            </Button>
+                            <Button Style="{StaticResource IconButton}" ToolTip="Stop and return to the start" Click="Stop_Click">
+                                <Path Width="14" Height="14" Stretch="Uniform" Fill="{DynamicResource InkBrush}" Data="M3,3 H15 V15 H3 Z"/>
+                            </Button>
+                            <Button x:Name="ForwardButton" Style="{StaticResource IconButton}" ToolTip="Fast-forward" Click="Forward_Click">
+                                <Path Width="19" Height="16" Stretch="Uniform" Fill="{DynamicResource InkBrush}" Data="M3,3 L10,8 L3,13 Z M11,3 L18,8 L11,13 Z"/>
+                            </Button>
+                        </StackPanel>
+
+                        <StackPanel x:Name="VolumePanel" Grid.Column="2" Orientation="Horizontal" HorizontalAlignment="Right" VerticalAlignment="Center">
+                            <TextBlock Text="Volume" FontSize="12" Foreground="{DynamicResource MutedBrush}" VerticalAlignment="Center" Margin="0,0,7,0" ToolTip="Preview volume. 100% is the source level."/>
+                            <Slider x:Name="VolumeSlider" Width="105" Minimum="0" Maximum="1" Value="1" ValueChanged="VolumeSlider_ValueChanged" ToolTip="Preview volume"/>
+                            <TextBlock x:Name="VolumeLabel" Width="42" Text="100%" FontSize="12" Foreground="{DynamicResource MutedBrush}" VerticalAlignment="Center" HorizontalAlignment="Right"/>
+                        </StackPanel>
+                    </Grid>
+
+                    <GridSplitter Grid.Row="3" Height="5" HorizontalAlignment="Stretch" Background="Transparent" ResizeDirection="Rows" ResizeBehavior="PreviousAndNext" ToolTip="Drag to resize the preview and timeline"/>
+
+                    <Border Grid.Row="4" Style="{StaticResource CardBorder}">
+                        <Grid>
+                            <Grid.RowDefinitions><RowDefinition Height="42"/><RowDefinition Height="*"/><RowDefinition Height="22"/></Grid.RowDefinitions>
+                            <Grid Margin="10,0">
+                                <Grid.ColumnDefinitions><ColumnDefinition Width="Auto"/><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+                                <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                                    <TextBlock Text="Timeline" FontWeight="SemiBold" VerticalAlignment="Center"/>
+                                    <Button Style="{StaticResource FlatButton}" Content="−" Margin="9,0,0,0" ToolTip="Zoom out" Click="ZoomOut_Click"/>
+                                    <Button Style="{StaticResource FlatButton}" Content="+" ToolTip="Zoom in" Click="ZoomIn_Click"/>
+                                    <Button Style="{StaticResource FlatButton}" Content="Fit" ToolTip="Fit the whole project in the timeline" Click="Fit_Click"/>
+                                    <Border Width="1" Height="18" Background="{DynamicResource LineBrush}" Margin="7,0"/>
+                                    <Button x:Name="RescanButton" Style="{StaticResource FlatButton}" Content="Rescan" Click="Rescan_Click" ToolTip="Read the source audio again and scan for quiet regions."/>
+                                    <Button x:Name="AddRegionButton" Style="{StaticResource FlatButton}" Content="+ Region" Click="AddRegion_Click" ToolTip="Click, then drag across the waveform to add one manual cut region."/>
+                                    <Button x:Name="RemoveRegionButton" Style="{StaticResource FlatButton}" Content="− Region" Click="RemoveRegion_Click" ToolTip="Remove the selected region marker and keep that audio."/>
+                                </StackPanel>
+                                <TextBlock x:Name="TimelineHint" Grid.Column="1" Text="Red = planned deletion • Test cuts previews live • Cut/Cut All renders it" Foreground="{DynamicResource MutedBrush}" FontSize="11.5" VerticalAlignment="Center" HorizontalAlignment="Center" TextTrimming="CharacterEllipsis" Margin="10,0"/>
+                                <CheckBox x:Name="SnappingCheck" Grid.Column="2" Content="Snap" IsChecked="True" VerticalAlignment="Center" Margin="0,0,14,0" Checked="SnappingCheck_Changed" Unchecked="SnappingCheck_Changed" ToolTip="Snap the playhead to nearby cut boundaries. You can tune this in Settings."/>
+                                <CheckBox x:Name="SkipCutsCheck" Grid.Column="3" Content="Test cuts" IsChecked="True" VerticalAlignment="Center" Checked="SkipCutsCheck_Changed" Unchecked="SkipCutsCheck_Changed" ToolTip="TEST mode: while playing, quickly jump over every marked red region so you can hear the planned edit before Cut/Cut All permanently renders it."/>
+                            </Grid>
+                            <controls:TimelineView x:Name="Timeline" Grid.Row="1" Margin="0,0,0,1" ToolTip="Click a pause to select it. Ctrl-click toggles selections; Shift-click selects a range. Right-click a pause for actions. Mouse wheel pans; Ctrl+wheel zooms."/>
+                            <Grid Grid.Row="2" Margin="8,2,8,4">
+                                <Slider x:Name="TimelinePanSlider" Minimum="0" Maximum="1000" ValueChanged="TimelinePanSlider_ValueChanged" Margin="0" ToolTip="Drag left or right through the zoomed timeline. Zoom in first if the full project already fits."/>
+                            </Grid>
+                        </Grid>
+                    </Border>
+                </Grid>
+
+                <GridSplitter x:Name="EditorSplitter" Grid.Column="1" Width="5" HorizontalAlignment="Stretch" Background="Transparent" ResizeDirection="Columns" ResizeBehavior="PreviousAndNext" ToolTip="Drag to resize the silence panel"/>
+
+                <Border x:Name="SidebarPanel" Grid.Column="2" Background="{DynamicResource PanelBrush}" BorderBrush="{DynamicResource LineBrush}" BorderThickness="1,0,0,0">
+                    <Grid>
+                        <Grid.RowDefinitions><RowDefinition Height="*"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
+                        <ScrollViewer Grid.Row="0" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled" PanningMode="VerticalOnly" Padding="0,0,2,0">
+                            <StackPanel Margin="18,15,16,14">
+                                <TextBlock Text="Cut silence" FontSize="20" FontWeight="SemiBold"/>
+                                <TextBlock Text="Tune detection here. Timeline actions — Rescan, + Region and − Region — are directly above the waveform." TextWrapping="Wrap" Foreground="{DynamicResource MutedBrush}" Margin="0,5,0,13"/>
+
+                                <Grid Margin="0,0,0,5">
+                                    <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+                                    <TextBlock Text="Background noise" FontWeight="SemiBold" VerticalAlignment="Center" ToolTip="Changes how aggressively silence is detected around room noise."/>
+                                    <Button Grid.Column="1" Style="{StaticResource FlatButton}" Content="Reset" FontSize="11" Padding="7,3" Click="ResetNoise_Click" ToolTip="Reset Background noise to Balanced"/>
+                                    <Button Grid.Column="2" Style="{StaticResource InfoButton}" Tag="Background noise" Click="Info_Click" ToolTip="What does Background noise do?"/>
+                                </Grid>
+                                <ComboBox x:Name="NoiseProfileCombo" SelectionChanged="NoiseProfileCombo_SelectionChanged" ToolTip="Choose a detection profile for your recording environment.">
+                                    <ComboBoxItem Content="Balanced"/><ComboBoxItem Content="Noisy Room"/><ComboBoxItem Content="Voice Focus"/><ComboBoxItem Content="Keep Ambience"/>
+                                </ComboBox>
+                                <TextBlock x:Name="NoiseProfileHelp" Text="Balanced works well for clean voice recordings." FontSize="12" TextWrapping="Wrap" Foreground="{DynamicResource MutedBrush}" Margin="0,6,0,12"/>
+
+                                <Grid Margin="0,1,0,0">
+                                    <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+                                    <CheckBox x:Name="SmartThresholdCheck" Content="Smart threshold" IsChecked="True" Checked="Check_SettingsChanged" Unchecked="Check_SettingsChanged" ToolTip="Automatically estimates the room noise floor from the recording."/>
+                                    <Button Grid.Column="1" Style="{StaticResource FlatButton}" Content="Reset" FontSize="11" Padding="7,3" Click="ResetSmartThreshold_Click" ToolTip="Turn Smart threshold back on"/>
+                                    <Button Grid.Column="2" Style="{StaticResource InfoButton}" Tag="Smart threshold" Click="Info_Click" ToolTip="What does Smart threshold do?"/>
+                                </Grid>
+
+                                <Grid Margin="0,10,0,0"><Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/><ColumnDefinition Width="Auto"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions><TextBlock Text="Threshold" FontWeight="SemiBold" VerticalAlignment="Center" ToolTip="Audio quieter than this level can count as silence."/><TextBlock x:Name="ThresholdValue" Grid.Column="1" HorizontalAlignment="Right" Foreground="{DynamicResource MutedBrush}" VerticalAlignment="Center" Margin="8,0"/><Button Grid.Column="2" Style="{StaticResource FlatButton}" Content="Reset" FontSize="11" Padding="7,3" Click="ResetThreshold_Click"/><Button Grid.Column="3" Style="{StaticResource InfoButton}" Tag="Threshold" Click="Info_Click" ToolTip="Threshold help"/></Grid>
+                                <Slider x:Name="ThresholdSlider" Minimum="-60" Maximum="-20" Value="-40" ValueChanged="Slider_SettingsChanged" ToolTip="Silence threshold in dB"/>
+
+                                <Grid Margin="0,9,0,0"><Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/><ColumnDefinition Width="Auto"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions><TextBlock Text="Minimum pause" FontWeight="SemiBold" VerticalAlignment="Center" ToolTip="The shortest quiet gap CutFlow should suggest."/><TextBlock x:Name="MinimumValue" Grid.Column="1" HorizontalAlignment="Right" Foreground="{DynamicResource MutedBrush}" VerticalAlignment="Center" Margin="8,0"/><Button Grid.Column="2" Style="{StaticResource FlatButton}" Content="Reset" FontSize="11" Padding="7,3" Click="ResetMinimum_Click"/><Button Grid.Column="3" Style="{StaticResource InfoButton}" Tag="Minimum pause" Click="Info_Click" ToolTip="Minimum pause help"/></Grid>
+                                <Slider x:Name="MinimumSlider" Minimum="0.04" Maximum="2.0" Value="0.08" TickFrequency="0.02" ValueChanged="Slider_SettingsChanged" ToolTip="Minimum duration of detected silence"/>
+
+                                <Grid Margin="0,9,0,0"><Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/><ColumnDefinition Width="Auto"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions><TextBlock Text="Padding" FontWeight="SemiBold" VerticalAlignment="Center" ToolTip="Keeps a little room before and after speech so cuts do not sound clipped."/><TextBlock x:Name="PaddingValue" Grid.Column="1" HorizontalAlignment="Right" Foreground="{DynamicResource MutedBrush}" VerticalAlignment="Center" Margin="8,0"/><Button Grid.Column="2" Style="{StaticResource FlatButton}" Content="Reset" FontSize="11" Padding="7,3" Click="ResetPadding_Click"/><Button Grid.Column="3" Style="{StaticResource InfoButton}" Tag="Padding" Click="Info_Click" ToolTip="Padding help"/></Grid>
+                                <Slider x:Name="PaddingSlider" Minimum="0" Maximum="0.65" Value="0.008" TickFrequency="0.005" ValueChanged="Slider_SettingsChanged" ToolTip="Speech padding around each suggested cut"/>
+
+                                <Grid Margin="0,9,0,0"><Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/><ColumnDefinition Width="Auto"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions><TextBlock Text="Ignore short clicks / object noises" FontWeight="SemiBold" VerticalAlignment="Center" ToolTip="Treats very short clicks, mouth pops and object bumps inside a quiet gap as part of the silence."/><TextBlock x:Name="BlipsValue" Grid.Column="1" HorizontalAlignment="Right" Foreground="{DynamicResource MutedBrush}" VerticalAlignment="Center" Margin="8,0"/><Button Grid.Column="2" Style="{StaticResource FlatButton}" Content="Reset" FontSize="11" Padding="7,3" Click="ResetBlips_Click"/><Button Grid.Column="3" Style="{StaticResource InfoButton}" Tag="Voice blips" Click="Info_Click" ToolTip="Voice blip help"/></Grid>
+                                <Slider x:Name="BlipsSlider" Minimum="0" Maximum="0.35" Value="0.10" TickFrequency="0.01" ValueChanged="Slider_SettingsChanged" ToolTip="Ignore very short non-speech sounds inside silence"/>
+
+                                <CheckBox x:Name="ProtectSoftVoiceCheck" Content="Protect whispers / soft speech" IsChecked="True" Margin="0,11,0,0" Checked="Check_SettingsChanged" Unchecked="Check_SettingsChanged" ToolTip="Protect sustained quiet speech so whispers and slurred words are much less likely to be marked as silence."/>
+
+                                <Border Background="{DynamicResource PanelAltBrush}" BorderBrush="{DynamicResource LineBrush}" BorderThickness="1" CornerRadius="8" Padding="10" Margin="0,12,0,0">
+                                    <StackPanel>
+                                        <Grid><Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions><TextBlock Text="Subtle voice cleanup" FontWeight="SemiBold" VerticalAlignment="Center"/><Button Grid.Column="1" Style="{StaticResource FlatButton}" Content="Reset" FontSize="11" Padding="7,3" Click="ResetCleanup_Click" ToolTip="Reset voice cleanup options"/></Grid>
+                                        <TextBlock Text="Optional processing for committed cuts and exports. Detection still focuses on whether you are speaking." FontSize="11.5" Foreground="{DynamicResource MutedBrush}" TextWrapping="Wrap" Margin="0,3,0,8"/>
+                                        <CheckBox x:Name="BlendCutEdgesCheck" Content="Blend cut edges smoothly" IsChecked="True" Checked="CleanupCheck_Changed" Unchecked="CleanupCheck_Changed" ToolTip="Adds a tiny edge fade at cuts to reduce clicks and harsh vocal joins without changing timing."/>
+                                        <CheckBox x:Name="MouthClicksCheck" Content="Reduce mouth clicks / spit pops" Margin="0,6,0,0" Checked="CleanupCheck_Changed" Unchecked="CleanupCheck_Changed" ToolTip="ON by default. Helps the next Rescan bridge tiny mouth/spit clicks inside pauses; subtle de-click cleanup is applied once during final export."/>
+                                        <CheckBox x:Name="ImpulsiveNoiseCheck" Content="Tame sudden bangs / bumps" Margin="0,6,0,0" Checked="CleanupCheck_Changed" Unchecked="CleanupCheck_Changed" ToolTip="ON by default. Helps the next Rescan ignore short non-voice bumps inside pauses; final export also soft-limits sudden peaks."/>
+                                        <CheckBox x:Name="BackgroundSqueaksCheck" Content="Reduce chair / background squeaks" Margin="0,6,0,0" Checked="CleanupCheck_Changed" Unchecked="CleanupCheck_Changed" ToolTip="ON by default. Helps the next Rescan ignore short background squeaks inside pauses; final export also applies light squeak/noise reduction."/>
+                                        <Grid Margin="0,10,0,0">
+                                            <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+                                            <TextBlock x:Name="CleanupRescanHint" Text="Rescan available anytime" Foreground="{DynamicResource MutedBrush}" FontSize="11.5" VerticalAlignment="Center" TextWrapping="Wrap" Margin="0,0,8,0"/>
+                                            <Button Grid.Column="1" Style="{StaticResource FlatButton}" Content="Rescan now" Click="Rescan_Click" ToolTip="Reread the current project audio using these detection/cleanup choices."/>
+                                        </Grid>
+                                    </StackPanel>
+                                </Border>
+
+                                <Separator Margin="0,13,0,11"/>
+                                <Grid>
+                                    <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+                                    <TextBlock Text="Regions" FontSize="15" FontWeight="SemiBold" VerticalAlignment="Center"/>
+                                    <TextBlock x:Name="CutCountLabel" Grid.Column="1" Foreground="{DynamicResource MutedBrush}" VerticalAlignment="Center"/>
+                                </Grid>
+                                <TextBlock Text="Red regions are the exact ranges CutFlow will remove. Keep removes a marker without deleting its audio." FontSize="12" Foreground="{DynamicResource MutedBrush}" Margin="0,3,0,7" TextWrapping="Wrap"/>
+                                <Grid MinHeight="100" MaxHeight="172" Margin="0,0,0,2">
+                                    <ListBox x:Name="CutsList" MinHeight="100" MaxHeight="172" SelectionMode="Extended" SelectionChanged="CutsList_SelectionChanged" PreviewMouseRightButtonDown="CutsList_PreviewMouseRightButtonDown" ScrollViewer.VerticalScrollBarVisibility="Auto" ToolTip="Select one or more pauses. Ctrl-click toggles items; Shift-click selects a range.">
+                                        <ListBox.ItemTemplate>
+                                            <DataTemplate>
+                                                <StackPanel Margin="8,5" MinWidth="0">
+                                                    <TextBlock Text="{Binding RangeLabel}" FontSize="12" TextTrimming="CharacterEllipsis"/>
+                                                    <TextBlock Text="{Binding DurationLabel}" FontSize="11.5" Foreground="{DynamicResource MutedBrush}"/>
+                                                </StackPanel>
+                                            </DataTemplate>
+                                        </ListBox.ItemTemplate>
+                                    </ListBox>
+                                    <Border x:Name="SuggestionEmptyState" IsHitTestVisible="False" Background="{DynamicResource PanelAltBrush}" BorderBrush="{DynamicResource LineBrush}" BorderThickness="1" CornerRadius="7" Padding="14" Visibility="Collapsed">
+                                        <StackPanel VerticalAlignment="Center" HorizontalAlignment="Center" MaxWidth="255">
+                                            <TextBlock Text="Empty" FontWeight="SemiBold" FontSize="13" HorizontalAlignment="Center"/>
+                                            <TextBlock Text="Press + Region to add one manually, or Rescan to detect silent gaps." Foreground="{DynamicResource MutedBrush}" TextWrapping="Wrap" TextAlignment="Center" FontSize="12" Margin="0,4,0,0"/>
+                                        </StackPanel>
+                                    </Border>
+                                </Grid>
+                            </StackPanel>
+                        </ScrollViewer>
+
+                        <Border x:Name="ActionBar" Grid.Row="1" Background="{DynamicResource PanelAltBrush}" BorderBrush="{DynamicResource LineBrush}" BorderThickness="0,1,0,0" Padding="14,11,14,12">
+                            <StackPanel>
+                                <Grid>
+                                    <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="8"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
+                                    <Button x:Name="SidebarUndoButton" Style="{StaticResource BaseButton}" Content="Undo" Click="Undo_Click" ToolTip="Undo the last edit (Ctrl+Z)."/>
+                                    <Button x:Name="KeepButton" Grid.Column="2" Style="{StaticResource BaseButton}" Content="Keep" Click="KeepSelected_Click" ToolTip="Keep the selected audio and remove its suggestion marker. Backspace/Delete does the same."/>
+                                </Grid>
+                                <Grid Margin="0,8,0,0">
+                                    <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="8"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
+                                    <Button x:Name="ApplyCutButton" Style="{StaticResource PrimaryButton}" Content="Cut" Click="ApplySelectedCut_Click" ToolTip="Confirm and apply the selected marked region(s) to edited playback."/>
+                                    <Button x:Name="CutAllButton" Grid.Column="2" Style="{StaticResource BaseButton}" Content="Cut All" Click="CutAll_Click" ToolTip="Confirm and cut every active marked region."/>
+                                </Grid>
+                                <Button x:Name="ExportButton" Style="{StaticResource ExportButtonStyle}" Content="Export…" Click="ExportMedia_Click" ToolTip="Open export settings for format, resolution, FPS, quality and destination." Margin="0,9,0,0"/>
+                                <TextBlock Text="Cut = delete selected red range  •  Keep/− Region = preserve it  •  Cut All = delete every marked red range" Foreground="{DynamicResource MutedBrush}" TextWrapping="Wrap" Margin="1,7,1,0" FontSize="11.5"/>
+                                <TextBlock x:Name="SidebarStatus" Text="Ready" Foreground="{DynamicResource MutedBrush}" TextWrapping="Wrap" Margin="1,7,1,0" FontSize="12" MaxHeight="34" TextTrimming="CharacterEllipsis"/>
+                            </StackPanel>
+                        </Border>
+                    </Grid>
+                </Border>
+            </Grid>
+
+            <!-- Bottom status -->
+            <Border x:Name="StatusBar" Grid.Row="2" Background="{DynamicResource PanelAltBrush}" BorderBrush="{DynamicResource LineBrush}" BorderThickness="0,1,0,0">
+                <Grid>
+                    <TextBlock x:Name="StatusText" Text="Ready" FontSize="11.5" Foreground="{DynamicResource MutedBrush}" VerticalAlignment="Center" Margin="11,0,190,0" TextTrimming="CharacterEllipsis"/>
+                    <TextBlock x:Name="AutosaveStatus" Text="Autosave ready" FontSize="11.5" Foreground="{DynamicResource MutedBrush}" VerticalAlignment="Center" HorizontalAlignment="Right" Margin="0,0,11,0"/>
+                </Grid>
+            </Border>
+
+            <!-- Large operation overlay -->
+            <Grid x:Name="OperationOverlay" Grid.RowSpan="3" Panel.ZIndex="50" Background="#76000000" Visibility="Collapsed">
+                <Border x:Name="OperationCard" Width="560" MaxWidth="760" Background="{DynamicResource PanelBrush}" BorderBrush="{DynamicResource StrongLineBrush}" BorderThickness="1" CornerRadius="12" Padding="27" HorizontalAlignment="Center" VerticalAlignment="Center" RenderTransformOrigin="0.5,0.5">
+                    <Border.RenderTransform><ScaleTransform x:Name="OperationCardScale" ScaleX="1" ScaleY="1"/></Border.RenderTransform>
+                    <StackPanel>
+                        <Grid Margin="0,0,0,4">
+                            <Grid.ColumnDefinitions><ColumnDefinition Width="34"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
+                            <Grid Width="24" Height="24" VerticalAlignment="Center" HorizontalAlignment="Left">
+                                <Grid.RenderTransform><RotateTransform x:Name="OperationSpinnerRotation" CenterX="12" CenterY="12"/></Grid.RenderTransform>
+                                <Ellipse Stroke="{DynamicResource StrongLineBrush}" StrokeThickness="3" Opacity="0.35"/>
+                                <Path Stroke="{DynamicResource AccentBrush}" StrokeThickness="3" StrokeStartLineCap="Round" Data="M12,1 A11,11 0 0 1 23,12"/>
+                            </Grid>
+                            <TextBlock x:Name="OperationTitle" Grid.Column="1" Text="Working…" FontSize="22" FontWeight="SemiBold" VerticalAlignment="Center"/>
+                        </Grid>
+                        <TextBlock x:Name="OperationMessage" Text="Preparing…" Foreground="{DynamicResource MutedBrush}" TextWrapping="Wrap" Margin="0,7,0,19"/>
+                        <ProgressBar x:Name="OperationProgress" Height="7" Minimum="0" Maximum="100"/>
+                        <Grid Margin="0,14,0,0">
+                            <TextBlock x:Name="OperationPercent" Text="0%" Foreground="{DynamicResource MutedBrush}" VerticalAlignment="Center"/>
+                            <Button x:Name="CancelOperationButton" Style="{StaticResource BaseButton}" Content="Cancel" HorizontalAlignment="Right" Click="CancelOperation_Click"/>
+                        </Grid>
+                    </StackPanel>
+                </Border>
+            </Grid>
+
+            <!-- Cut confirmation. Nothing is rendered until the user explicitly confirms. -->
+            <Grid x:Name="CutConfirmOverlay" Grid.RowSpan="3" Panel.ZIndex="65" Background="#82000000" Visibility="Collapsed">
+                <Border x:Name="CutConfirmCard" Width="520" MaxWidth="680" Background="{DynamicResource PanelBrush}" BorderBrush="{DynamicResource StrongLineBrush}" BorderThickness="1" CornerRadius="12" Padding="24" HorizontalAlignment="Center" VerticalAlignment="Center" RenderTransformOrigin="0.5,0.5">
+                    <Border.RenderTransform><ScaleTransform x:Name="CutConfirmCardScale" ScaleX="1" ScaleY="1"/></Border.RenderTransform>
+                    <StackPanel>
+                        <Grid>
+                            <Grid.ColumnDefinitions><ColumnDefinition Width="Auto"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
+                            <Border Width="38" Height="38" CornerRadius="19" Background="#22E35D6A" BorderBrush="{DynamicResource DangerBrush}" BorderThickness="1" Margin="0,0,13,0">
+                                <Path Data="M12,4 L20,20 M20,4 L12,20" Stroke="{DynamicResource DangerBrush}" StrokeThickness="2.4" StrokeStartLineCap="Round" StrokeEndLineCap="Round" Stretch="Uniform" Margin="9"/>
+                            </Border>
+                            <StackPanel Grid.Column="1">
+                                <TextBlock x:Name="CutConfirmTitle" Text="Apply cuts?" FontSize="21" FontWeight="SemiBold"/>
+                                <TextBlock x:Name="CutConfirmBody" Text="The marked silence will be removed from the edited preview." FontSize="13" LineHeight="20" Foreground="{DynamicResource MutedBrush}" TextWrapping="Wrap" Margin="0,7,0,0"/>
+                            </StackPanel>
+                        </Grid>
+                        <Border Background="{DynamicResource PanelAltBrush}" BorderBrush="{DynamicResource LineBrush}" BorderThickness="1" CornerRadius="8" Padding="12,10" Margin="0,18,0,18">
+                            <TextBlock Text="Your original video/audio file is never overwritten. CutFlow creates an edited preview/project instead." Foreground="{DynamicResource MutedBrush}" TextWrapping="Wrap" FontSize="12"/>
+                        </Border>
+                        <Grid>
+                            <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/><ColumnDefinition Width="8"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+                            <Button Grid.Column="1" Style="{StaticResource BaseButton}" Content="Cancel" MinWidth="96" Click="CutConfirmCancel_Click"/>
+                            <Button x:Name="CutConfirmApplyButton" Grid.Column="3" Style="{StaticResource ExportButtonStyle}" Content="Confirm cut" MinWidth="116" Click="CutConfirmApply_Click"/>
+                        </Grid>
+                    </StackPanel>
+                </Border>
+            </Grid>
+
+            <!-- In-app information panel used by the real info icons (avoids native message-box chrome). -->
+            <Grid x:Name="InfoOverlay" Grid.RowSpan="3" Panel.ZIndex="70" Background="#72000000" Visibility="Collapsed">
+                <Border Width="500" MaxWidth="620" Background="{DynamicResource PanelBrush}" BorderBrush="{DynamicResource StrongLineBrush}" BorderThickness="1" CornerRadius="12" Padding="22" HorizontalAlignment="Center" VerticalAlignment="Center">
+                    <StackPanel>
+                        <Grid>
+                            <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+                            <TextBlock x:Name="InfoTitle" Text="Setting information" FontSize="20" FontWeight="SemiBold" VerticalAlignment="Center"/>
+                            <Button Grid.Column="1" Style="{StaticResource FlatButton}" Content="×" FontSize="18" Click="InfoClose_Click" ToolTip="Close"/>
+                        </Grid>
+                        <TextBlock x:Name="InfoBody" Text="Information" FontSize="13" LineHeight="20" Foreground="{DynamicResource MutedBrush}" TextWrapping="Wrap" Margin="0,10,0,18"/>
+                        <Button Style="{StaticResource ExportButtonStyle}" Content="Got it" HorizontalAlignment="Right" MinWidth="94" Click="InfoClose_Click"/>
+                    </StackPanel>
+                </Border>
+            </Grid>
+
+            <!-- Save toast -->
+            <Border x:Name="SaveToast" Grid.Row="1" Panel.ZIndex="60" Background="{DynamicResource PanelBrush}" BorderBrush="{DynamicResource StrongLineBrush}" BorderThickness="1" CornerRadius="9" Padding="12,9" HorizontalAlignment="Right" VerticalAlignment="Bottom" Margin="0,0,18,16" Visibility="Collapsed">
+                <StackPanel Orientation="Horizontal">
+                    <Grid Width="18" Height="18" Margin="0,0,9,0">
+                        <Path x:Name="SaveSpinner" Stroke="{DynamicResource AccentBrush}" StrokeThickness="2" StrokeStartLineCap="Round" StrokeEndLineCap="Round" Data="M9,2 A7,7 0 1 1 3.2,5" RenderTransformOrigin="0.5,0.5">
+                            <Path.RenderTransform><RotateTransform x:Name="SaveSpinnerRotation" Angle="0"/></Path.RenderTransform>
+                        </Path>
+                        <Path x:Name="SaveCheck" Visibility="Collapsed" Stroke="{DynamicResource SuccessBrush}" StrokeThickness="2" StrokeStartLineCap="Round" StrokeEndLineCap="Round" Data="M3,9 L7,13 L15,5"/>
+                    </Grid>
+                    <TextBlock x:Name="SaveToastText" Text="Saving project…" VerticalAlignment="Center" FontSize="12.5"/>
+                </StackPanel>
+            </Border>
+
+            <!-- View-only guided tour. The transparent Grid background intentionally captures
+                 input even in the highlighted hole, so controls underneath cannot be clicked. -->
+            <Grid x:Name="TutorialOverlay" Grid.RowSpan="3" Panel.ZIndex="90" Visibility="Collapsed" Background="Transparent">
+                <Canvas x:Name="TutorialShadeCanvas">
+                    <Border x:Name="TutorialShadeTop" Background="#B8000000" IsHitTestVisible="True"/>
+                    <Border x:Name="TutorialShadeLeft" Background="#B8000000" IsHitTestVisible="True"/>
+                    <Border x:Name="TutorialShadeRight" Background="#B8000000" IsHitTestVisible="True"/>
+                    <Border x:Name="TutorialShadeBottom" Background="#B8000000" IsHitTestVisible="True"/>
+                    <Border x:Name="TutorialHighlight" BorderBrush="{DynamicResource AccentBrush}" BorderThickness="2" CornerRadius="8" Background="#09000000" IsHitTestVisible="False"/>
+                </Canvas>
+                <Border x:Name="TutorialCard" Width="420" MaxHeight="300" Background="{DynamicResource PanelBrush}" BorderBrush="{DynamicResource StrongLineBrush}" BorderThickness="1" CornerRadius="14" Padding="22" HorizontalAlignment="Right" VerticalAlignment="Top" Margin="0,72,24,0">
+                    <Border.RenderTransform><TranslateTransform x:Name="TutorialCardTranslate" Y="0"/></Border.RenderTransform>
+                    <StackPanel>
+                        <TextBlock x:Name="TutorialStepLabel" Text="Tutorial" Foreground="{DynamicResource AccentBrush}" FontWeight="SemiBold" FontSize="12"/>
+                        <TextBlock x:Name="TutorialTitle" Text="Welcome to CutFlow" FontSize="21" FontWeight="SemiBold" Margin="0,5,0,0"/>
+                        <TextBlock x:Name="TutorialBody" Text="CutFlow finds silence, lets you review it, then exports a cleaner edit." TextWrapping="Wrap" Foreground="{DynamicResource MutedBrush}" FontSize="13" LineHeight="19" Margin="0,7,0,16"/>
+                        <Grid>
+                            <Grid.ColumnDefinitions><ColumnDefinition Width="Auto"/><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/><ColumnDefinition Width="8"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+                            <Button Style="{StaticResource FlatButton}" Content="Exit tour" Click="TutorialStop_Click"/>
+                            <Button x:Name="TutorialBackButton" Grid.Column="2" Style="{StaticResource BaseButton}" Content="Back" Click="TutorialBack_Click"/>
+                            <Button x:Name="TutorialNextButton" Grid.Column="4" Style="{StaticResource PrimaryButton}" Content="Next" Click="TutorialNext_Click"/>
+                        </Grid>
+                    </StackPanel>
+                </Border>
+            </Grid>
+        </Grid>
+    </Border>
+</Window>

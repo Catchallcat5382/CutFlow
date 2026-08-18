@@ -1,0 +1,27 @@
+<Window x:Class="CutFlow.UninstallConfirmWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:shell="clr-namespace:System.Windows.Shell;assembly=PresentationFramework"
+        Title="Uninstall CutFlow" Width="510" Height="330" WindowStyle="None" ResizeMode="NoResize"
+        WindowStartupLocation="CenterOwner" Background="{DynamicResource WindowBrush}" ShowInTaskbar="False">
+    <shell:WindowChrome.WindowChrome><shell:WindowChrome CaptionHeight="0" ResizeBorderThickness="0" CornerRadius="12" GlassFrameThickness="0" UseAeroCaptionButtons="False"/></shell:WindowChrome.WindowChrome>
+    <Border CornerRadius="12" BorderThickness="1" BorderBrush="{DynamicResource StrongLineBrush}" Background="{DynamicResource PanelBrush}" Padding="24">
+        <Grid>
+            <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="*"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
+            <StackPanel>
+                <TextBlock Text="Uninstall CutFlow?" FontSize="22" FontWeight="SemiBold"/>
+                <TextBlock Text="Are you sure? CutFlow will close and its installer-managed files will be removed." Foreground="{DynamicResource MutedBrush}" TextWrapping="Wrap" Margin="0,8,0,0" FontSize="13"/>
+            </StackPanel>
+            <Border Grid.Row="1" Margin="0,20,0,18" Padding="14" CornerRadius="9" Background="{DynamicResource PanelAltBrush}" BorderBrush="{DynamicResource LineBrush}" BorderThickness="1">
+                <StackPanel>
+                    <CheckBox x:Name="DeleteDataCheck" Content="Also delete all CutFlow data" FontWeight="SemiBold"/>
+                    <TextBlock Text="Off by default. If enabled, this also removes projects, autosaves, settings, cached FFmpeg files, logs and other data stored under LocalAppData\\CutFlow." TextWrapping="Wrap" Foreground="{DynamicResource MutedBrush}" FontSize="12" Margin="24,6,0,0"/>
+                </StackPanel>
+            </Border>
+            <StackPanel Grid.Row="2" Orientation="Horizontal" HorizontalAlignment="Right">
+                <Button Style="{StaticResource BaseButton}" Content="Cancel" Width="100" Margin="0,0,8,0" Click="Cancel_Click"/>
+                <Button Style="{StaticResource DangerButton}" Content="Uninstall CutFlow" Width="150" Click="Confirm_Click"/>
+            </StackPanel>
+        </Grid>
+    </Border>
+</Window>

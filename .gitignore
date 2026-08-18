@@ -1,0 +1,20 @@
+# Build outputs
+bin/
+obj/
+dist/
+releases/
+.dotnet/
+
+# Local tooling/settings
+.vs/
+.idea/
+*.user
+*.suo
+*.log
+
+# Downloaded build-only model (build.bat restores it when missing)
+Assets/silero_vad.onnx
+
+# OS junk
+Thumbs.db
+.DS_Store

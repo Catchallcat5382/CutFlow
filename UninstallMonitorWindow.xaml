@@ -1,0 +1,19 @@
+<Window x:Class="CutFlow.UninstallMonitorWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="Uninstalling CutFlow" Width="520" Height="255" WindowStyle="None" ResizeMode="NoResize"
+        WindowStartupLocation="CenterScreen" ShowInTaskbar="False" Topmost="True" Background="#17191C">
+    <Border CornerRadius="14" BorderThickness="1" BorderBrush="#3A3E44" Background="#202327" Padding="24">
+        <Grid>
+            <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
+            <TextBlock Text="Uninstalling CutFlow" Foreground="White" FontSize="21" FontWeight="SemiBold"/>
+            <TextBlock x:Name="StageText" Grid.Row="1" Text="Preparing uninstall…" Foreground="#B5BBC3" Margin="0,8,0,0" FontSize="13"/>
+            <ProgressBar x:Name="Progress" Grid.Row="2" Height="10" Margin="0,22,0,0" Minimum="0" Maximum="100" Value="2"/>
+            <Grid Grid.Row="3" Margin="0,10,0,0">
+                <TextBlock x:Name="ProgressText" Text="2%" Foreground="#DDE2E7"/>
+                <TextBlock x:Name="EtaText" Text="Starting…" Foreground="#9FA6AE" HorizontalAlignment="Right"/>
+            </Grid>
+            <TextBlock Grid.Row="4" Text="CutFlow is uninstalling in the background. Do not end this process while the progress bar is moving." Foreground="#9FA6AE" TextWrapping="Wrap" Margin="0,20,0,0" FontSize="12"/>
+        </Grid>
+    </Border>
+</Window>

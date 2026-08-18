@@ -1,0 +1,33 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net8.0-windows</TargetFramework>
+    <UseWPF>true</UseWPF>
+    <UseWindowsForms>true</UseWindowsForms>
+    <Nullable>enable</Nullable>
+    <!-- Keep WinForms referenced for the tray icon, but do NOT globally import
+         System.Windows.Forms/System.Drawing into the WPF editor. Those implicit
+         imports make WPF types such as Application, Color, ComboBox, Point,
+         Brush, KeyEventArgs and OpenFileDialog ambiguous. -->
+    <ImplicitUsings>disable</ImplicitUsings>
+    <AssemblyName>CutFlow</AssemblyName>
+    <RootNamespace>CutFlow</RootNamespace>
+    <ApplicationManifest>app.manifest</ApplicationManifest>
+    <ApplicationIcon>Assets\CutFlow.ico</ApplicationIcon>
+    <Version>3.23.2</Version>
+    <FileVersion>3.23.2.0</FileVersion>
+    <AssemblyVersion>3.23.2.0</AssemblyVersion>
+    <PublishSingleFile>true</PublishSingleFile>
+    <SelfContained>true</SelfContained>
+    <RuntimeIdentifier>win-x64</RuntimeIdentifier>
+    <IncludeNativeLibrariesForSelfExtract>true</IncludeNativeLibrariesForSelfExtract>
+    <DebugType>none</DebugType>
+    <DebugSymbols>false</DebugSymbols>
+  </PropertyGroup>
+  <ItemGroup>
+    <Resource Include="Assets\Sounds\*.wav" />
+    <EmbeddedResource Include="Assets\silero_vad.onnx" LogicalName="CutFlow.Assets.silero_vad.onnx" />
+    <EmbeddedResource Include="THIRD_PARTY_NOTICES.md" LogicalName="CutFlow.THIRD_PARTY_NOTICES.md" />
+    <PackageReference Include="Microsoft.ML.OnnxRuntime" Version="1.28.0" />
+  </ItemGroup>
+</Project>
