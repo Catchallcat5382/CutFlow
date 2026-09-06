@@ -22,3 +22,15 @@ Do **not** delete the `.git` folder. Just replace the project files with v3.23.2
 
 ### Git repair
 If a failed setup left an incomplete `.git`, rerun `setup.bat`. v3.23.2 backs up only the broken Git metadata to `%LOCALAPPDATA%\CutFlow\SetupBackups`, reinitializes Git, and keeps all project/source files.
+
+## Where the installer is created
+
+Every successful `build.bat` now creates all of these:
+
+- `dist\installer\CutFlow-Setup-vX.Y.Z.exe` — build output
+- `releases\vX.Y.Z\CutFlow-Setup-vX.Y.Z.exe` — versioned local release
+- `releases\latest\CutFlow-Setup.exe` — always the newest installer
+- `releases\latest\CutFlow-Setup-vX.Y.Z.exe` — newest installer with the version visible in the filename
+- `releases\latest\VERSION.txt` — current version
+
+`setup.bat` also runs `build.bat` once at the end, so a successful first-time setup leaves a current installer in `releases\latest` immediately.

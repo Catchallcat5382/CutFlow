@@ -22,6 +22,8 @@ public partial class RenderMonitorWindow : Window
     private bool _finished;
     private DateTime _startedUtc;
     private double _lastProgress;
+    private double _workerEtaSeconds = -1;
+    private string _completedDestinationPath = string.Empty;
 
     public RenderMonitorWindow(string jobPath)
     {
@@ -48,9 +50,18 @@ public partial class RenderMonitorWindow : Window
         {
             _job = await ReadJsonAsync<RenderWorkerJob>(_jobPath);
             ProjectText.Text = string.IsNullOrWhiteSpace(_job.ProjectName) ? "CutFlow project" : _job.ProjectName;
-            TitleText.Text = "Applying cuts";
-            StageText.Text = $"Sending {_job.CutRanges.Count} marked regions to the background processor…";
-            WarningText.Text = "DO NOT CLOSE THE EDITOR while cuts are being applied. If it says Not Responding, leave it alone. This monitor and the hidden worker are separate. If the editor is force-closed, the worker cancels and the saved project stays unchanged.";
+            var isExport = _job.JobKind.Equals("Export", StringComparison.OrdinalIgnoreCase);
+            Height = isExport ? 342 : 286;
+            TitleText.Text = isExport ? "Exporting media" : "Applying cuts";
+            StageText.Text = isExport
+                ? $"Preparing {_job.ExportOptions?.Format ?? "media"} export…"
+                : $"Sending {_job.CutRanges.Count} marked regions to the background processor…";
+            WarningText.Text = isExport
+                ? "Export is running in a separate CutFlow worker. You can keep using the editor; if the editor is closed, the export worker can continue in the system tray."
+                : "DO NOT CLOSE THE EDITOR while cuts are being applied. If it says Not Responding, leave it alone. This monitor and the hidden worker are separate. If the editor is force-closed, the worker cancels and the saved project stays unchanged.";
+            FootnoteText.Text = isExport
+                ? "The export worker writes directly to your chosen destination. Your CutFlow project and current working media are not modified by the export."
+                : "The original imported media is not overwritten. CutFlow only switches to the shortened working file after this processor verifies its duration.";
             _startedUtc = DateTime.UtcNow;
             FollowParentWindow();
             _followTimer.Start();
@@ -79,6 +90,7 @@ public partial class RenderMonitorWindow : Window
             {
                 if (progress.StartedUtc != default) _startedUtc = progress.StartedUtc;
                 _lastProgress = Math.Clamp(progress.Progress, 0, 1);
+                _workerEtaSeconds = progress.EstimatedSecondsRemaining;
                 UpdateProgress(_lastProgress, progress.Stage, progress.MergedRangeCount > 0 ? progress.MergedRangeCount : progress.InputRangeCount);
                 if (progress.HasError)
                 {
@@ -96,6 +108,29 @@ public partial class RenderMonitorWindow : Window
                     if (!result.Success)
                     {
                         ShowFailure(string.IsNullOrWhiteSpace(result.Error) ? "The background cut failed." : result.Error);
+                        return;
+                    }
+
+                    var isExport = _job.JobKind.Equals("Export", StringComparison.OrdinalIgnoreCase);
+                    if (isExport)
+                    {
+                        _completedDestinationPath = result.DestinationPath ?? string.Empty;
+                        UpdateProgress(1, "Export finished successfully", 0);
+                        TitleText.Text = "Export finished";
+                        WarningText.Text = string.IsNullOrWhiteSpace(_completedDestinationPath)
+                            ? "Your export finished successfully."
+                            : $"Saved as {Path.GetFileName(_completedDestinationPath)}";
+                        FootnoteText.Text = "Press Open in Folder to show the exported file, or OK to close this window.";
+                        PercentText.Text = "100%";
+                        TimeText.Text = $"Finished in {FormatDuration((DateTime.UtcNow - _startedUtc).TotalSeconds)}";
+                        _finished = true;
+                        _pollTimer.Stop();
+                        _followTimer.Stop();
+                        CompletionActions.Visibility = Visibility.Visible;
+                        OpenFolderButton.Visibility = string.IsNullOrWhiteSpace(_completedDestinationPath) ? Visibility.Collapsed : Visibility.Visible;
+                        if (!IsVisible) Show();
+                        Activate();
+                        OkButton.Focus();
                         return;
                     }
 
@@ -130,17 +165,22 @@ public partial class RenderMonitorWindow : Window
         ProgressFill.BeginAnimation(WidthProperty, animation, HandoffBehavior.SnapshotAndReplace);
 
         var elapsed = DateTime.UtcNow - _startedUtc;
-        if (value >= 0.025 && value < 0.995)
-        {
-            // Intentionally tiny math only: no media inspection, no FFmpeg access, no waveform work.
-            var remaining = elapsed.TotalSeconds * (1.0 - value) / Math.Max(0.001, value);
-            TimeText.Text = $"Elapsed {FormatDuration(elapsed.TotalSeconds)}  •  About {FormatDuration(remaining)} remaining";
-        }
-        else if (value >= 0.995)
+        if (value >= 0.995)
         {
             TimeText.Text = $"Elapsed {FormatDuration(elapsed.TotalSeconds)}  •  Finishing up…";
         }
-        else TimeText.Text = "Estimating time remaining…";
+        else if (_workerEtaSeconds >= 0 && !double.IsNaN(_workerEtaSeconds) && !double.IsInfinity(_workerEtaSeconds))
+        {
+            TimeText.Text = $"Elapsed {FormatDuration(elapsed.TotalSeconds)}  •  About {FormatDuration(_workerEtaSeconds)} remaining";
+        }
+        else if (elapsed.TotalSeconds >= 1.0 && value >= 0.0015)
+        {
+            // Fallback for old cut jobs that do not publish a worker ETA. The threshold is tiny so
+            // long exports no longer need to reach 2.5% before the user sees an estimate.
+            var remaining = elapsed.TotalSeconds * (1.0 - value) / Math.Max(0.0001, value);
+            TimeText.Text = $"Elapsed {FormatDuration(elapsed.TotalSeconds)}  •  About {FormatDuration(remaining)} remaining";
+        }
+        else TimeText.Text = $"Elapsed {FormatDuration(elapsed.TotalSeconds)}  •  Estimating…";
     }
 
     private void ShowFailure(string message)
@@ -148,16 +188,50 @@ public partial class RenderMonitorWindow : Window
         _finished = true;
         _pollTimer.Stop();
         _followTimer.Stop();
-        TitleText.Text = "Cut could not finish";
+        TitleText.Text = _job?.JobKind.Equals("Export", StringComparison.OrdinalIgnoreCase) == true ? "Export could not finish" : "Cut could not finish";
         StageText.Text = message;
-        WarningText.Text = "The original imported media was not overwritten. Return to the editor and try again.";
+        WarningText.Text = _job?.JobKind.Equals("Export", StringComparison.OrdinalIgnoreCase) == true
+            ? "The editor project was not changed. Return to CutFlow and try the export again."
+            : "The original imported media was not overwritten. Return to the editor and try again.";
         PercentText.Text = "Error";
         ProgressFill.Background = new System.Windows.Media.SolidColorBrush(System.Windows.Media.Color.FromRgb(190, 76, 72));
-        _ = Task.Run(async () =>
+        CompletionActions.Visibility = Visibility.Visible;
+        OpenFolderButton.Visibility = Visibility.Collapsed;
+        if (!IsVisible) Show();
+        Activate();
+        OkButton.Focus();
+    }
+
+    private void Ok_Click(object sender, RoutedEventArgs e)
+    {
+        _finished = true;
+        _pollTimer.Stop();
+        _followTimer.Stop();
+        Application.Current.Shutdown(0);
+    }
+
+    private void OpenFolder_Click(object sender, RoutedEventArgs e)
+    {
+        if (string.IsNullOrWhiteSpace(_completedDestinationPath)) return;
+        try
         {
-            await Task.Delay(4500);
-            Application.Current.Dispatcher.BeginInvoke(new Action(() => Application.Current.Shutdown(2)));
-        });
+            var fullPath = Path.GetFullPath(_completedDestinationPath);
+            if (File.Exists(fullPath))
+            {
+                Process.Start(new ProcessStartInfo("explorer.exe")
+                {
+                    UseShellExecute = true,
+                    Arguments = $"/select,\"{fullPath.Replace("\"", string.Empty)}\""
+                });
+            }
+            else
+            {
+                var folder = Path.GetDirectoryName(fullPath);
+                if (!string.IsNullOrWhiteSpace(folder) && Directory.Exists(folder))
+                    Process.Start(new ProcessStartInfo("explorer.exe", folder) { UseShellExecute = true });
+            }
+        }
+        catch { }
     }
 
     private async Task<bool> WaitForEditorAcknowledgeAsync()

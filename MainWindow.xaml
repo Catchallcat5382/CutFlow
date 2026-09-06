@@ -29,6 +29,7 @@
                                 <MenuItem Header="New Project" InputGestureText="Ctrl+N" Click="NewProject_Click"/>
                                 <MenuItem Header="Open Project…" InputGestureText="Ctrl+O" Click="OpenProject_Click"/>
                                 <MenuItem Header="Open Projects Folder" Click="OpenProjectsFolder_Click"/>
+                                <MenuItem Header="Open Exports Folder" Click="OpenExportsFolder_Click"/>
                                 <Separator/>
                                 <MenuItem Header="Save" InputGestureText="Ctrl+S" Click="Save_Click"/>
                                 <MenuItem Header="Save As…" InputGestureText="Ctrl+Shift+S" Click="SaveAs_Click"/>
@@ -48,7 +49,11 @@
                                 <MenuItem x:Name="UndoMenuItem" Header="Undo" InputGestureText="Ctrl+Z" Click="Undo_Click"/>
                                 <MenuItem x:Name="RedoMenuItem" Header="Redo" InputGestureText="Ctrl+Y" Click="Redo_Click"/>
                                 <Separator/>
-                                <MenuItem Header="Cut selected" InputGestureText="Enter" Click="ApplySelectedCut_Click"/>
+                                <MenuItem x:Name="CopyRegionsMenuItem" Header="Copy selected regions" InputGestureText="Ctrl+C" Click="CopyRegions_Click"/>
+                                <MenuItem x:Name="CutRegionsMenuItem" Header="Cut selected regions to clipboard" InputGestureText="Ctrl+X" Click="CutRegionsClipboard_Click"/>
+                                <MenuItem x:Name="PasteRegionsMenuItem" Header="Paste regions at playhead" InputGestureText="Ctrl+V" Click="PasteRegions_Click"/>
+                                <Separator/>
+                                <MenuItem Header="Apply selected media cut" InputGestureText="Enter" Click="ApplySelectedCut_Click"/>
                                 <MenuItem Header="Keep / remove selected" InputGestureText="Backspace" Click="KeepSelected_Click"/>
                                 <MenuItem Header="Cut all marked regions" InputGestureText="Ctrl+Delete" Click="CutAll_Click"/>
                                 <Separator/>
@@ -176,7 +181,7 @@
                 <Grid.ColumnDefinitions>
                     <ColumnDefinition Width="*" MinWidth="520"/>
                     <ColumnDefinition x:Name="SplitterColumn" Width="5"/>
-                    <ColumnDefinition x:Name="SidebarColumn" Width="355" MinWidth="285" MaxWidth="470"/>
+                    <ColumnDefinition x:Name="SidebarColumn" Width="355" MinWidth="260" MaxWidth="650"/>
                 </Grid.ColumnDefinitions>
 
                 <Grid Grid.Column="0" Margin="12,9,7,11">
@@ -185,7 +190,7 @@
                         <RowDefinition Height="*" MinHeight="170"/>
                         <RowDefinition Height="58"/>
                         <RowDefinition Height="5"/>
-                        <RowDefinition Height="245" MinHeight="170"/>
+                        <RowDefinition x:Name="TimelineRow" Height="245" MinHeight="150"/>
                     </Grid.RowDefinitions>
 
                     <Grid Grid.Row="0" Margin="3,0,3,8" MinHeight="28">
@@ -243,7 +248,7 @@
                         </StackPanel>
                     </Grid>
 
-                    <GridSplitter Grid.Row="3" Height="5" HorizontalAlignment="Stretch" Background="Transparent" ResizeDirection="Rows" ResizeBehavior="PreviousAndNext" ToolTip="Drag to resize the preview and timeline"/>
+                    <GridSplitter x:Name="PreviewTimelineSplitter" Grid.Row="3" Height="5" HorizontalAlignment="Stretch" Background="Transparent" ResizeDirection="Rows" ResizeBehavior="PreviousAndNext" DragCompleted="PreviewTimelineSplitter_DragCompleted" ToolTip="Drag to resize the preview and timeline"/>
 
                     <Border Grid.Row="4" Style="{StaticResource CardBorder}">
                         <Grid>
@@ -256,9 +261,17 @@
                                     <Button Style="{StaticResource FlatButton}" Content="+" ToolTip="Zoom in" Click="ZoomIn_Click"/>
                                     <Button Style="{StaticResource FlatButton}" Content="Fit" ToolTip="Fit the whole project in the timeline" Click="Fit_Click"/>
                                     <Border Width="1" Height="18" Background="{DynamicResource LineBrush}" Margin="7,0"/>
-                                    <Button x:Name="RescanButton" Style="{StaticResource FlatButton}" Content="Rescan" Click="Rescan_Click" ToolTip="Read the source audio again and scan for quiet regions."/>
+                                    <Button x:Name="RescanButton" Style="{StaticResource FlatButton}" Content="Rescan" Click="Rescan_Click" ToolTip="Read the current working audio again and replace the automatic pause scan."/>
                                     <Button x:Name="AddRegionButton" Style="{StaticResource FlatButton}" Content="+ Region" Click="AddRegion_Click" ToolTip="Click, then drag across the waveform to add one manual cut region."/>
                                     <Button x:Name="RemoveRegionButton" Style="{StaticResource FlatButton}" Content="− Region" Click="RemoveRegion_Click" ToolTip="Remove the selected region marker and keep that audio."/>
+                                    <Button x:Name="PasteRegionButton" Style="{StaticResource FlatButton}" Content="Paste" Click="PasteRegions_Click" ToolTip="Paste copied regions at the playhead (Ctrl+V)."/>
+                                    <Border Width="1" Height="18" Background="{DynamicResource LineBrush}" Margin="7,0"/>
+                                    <Button x:Name="ToolbarUndoButton" Style="{StaticResource IconButton}" Click="Undo_Click" ToolTip="Undo (Ctrl+Z)">
+                                        <Path Width="16" Height="16" Stretch="Uniform" Stroke="{DynamicResource InkBrush}" StrokeThickness="1.8" StrokeStartLineCap="Round" StrokeEndLineCap="Round" Data="M8,5 L3,9 L8,13 M4,9 H12 C16,9 18,11 18,15"/>
+                                    </Button>
+                                    <Button x:Name="ToolbarRedoButton" Style="{StaticResource IconButton}" Click="Redo_Click" ToolTip="Redo (Ctrl+Y)">
+                                        <Path Width="16" Height="16" Stretch="Uniform" Stroke="{DynamicResource InkBrush}" StrokeThickness="1.8" StrokeStartLineCap="Round" StrokeEndLineCap="Round" Data="M12,5 L17,9 L12,13 M16,9 H8 C4,9 2,11 2,15"/>
+                                    </Button>
                                 </StackPanel>
                                 <TextBlock x:Name="TimelineHint" Grid.Column="1" Text="Red = planned deletion • Test cuts previews live • Cut/Cut All renders it" Foreground="{DynamicResource MutedBrush}" FontSize="11.5" VerticalAlignment="Center" HorizontalAlignment="Center" TextTrimming="CharacterEllipsis" Margin="10,0"/>
                                 <CheckBox x:Name="SnappingCheck" Grid.Column="2" Content="Snap" IsChecked="True" VerticalAlignment="Center" Margin="0,0,14,0" Checked="SnappingCheck_Changed" Unchecked="SnappingCheck_Changed" ToolTip="Snap the playhead to nearby cut boundaries. You can tune this in Settings."/>
@@ -266,13 +279,13 @@
                             </Grid>
                             <controls:TimelineView x:Name="Timeline" Grid.Row="1" Margin="0,0,0,1" ToolTip="Click a pause to select it. Ctrl-click toggles selections; Shift-click selects a range. Right-click a pause for actions. Mouse wheel pans; Ctrl+wheel zooms."/>
                             <Grid Grid.Row="2" Margin="8,2,8,4">
-                                <Slider x:Name="TimelinePanSlider" Minimum="0" Maximum="1000" ValueChanged="TimelinePanSlider_ValueChanged" Margin="0" ToolTip="Drag left or right through the zoomed timeline. Zoom in first if the full project already fits."/>
+                                <ScrollBar x:Name="TimelinePanSlider" Orientation="Horizontal" Minimum="0" Maximum="1000" SmallChange="20" LargeChange="120" ViewportSize="160" ValueChanged="TimelinePanSlider_ValueChanged" Margin="0" Height="15" ToolTip="Horizontal timeline scrollbar. Drag it left/right when zoomed in."/>
                             </Grid>
                         </Grid>
                     </Border>
                 </Grid>
 
-                <GridSplitter x:Name="EditorSplitter" Grid.Column="1" Width="5" HorizontalAlignment="Stretch" Background="Transparent" ResizeDirection="Columns" ResizeBehavior="PreviousAndNext" ToolTip="Drag to resize the silence panel"/>
+                <GridSplitter x:Name="EditorSplitter" Grid.Column="1" Width="5" HorizontalAlignment="Stretch" Background="Transparent" ResizeDirection="Columns" ResizeBehavior="PreviousAndNext" DragCompleted="EditorSplitter_DragCompleted" ToolTip="Drag to resize the silence panel"/>
 
                 <Border x:Name="SidebarPanel" Grid.Column="2" Background="{DynamicResource PanelBrush}" BorderBrush="{DynamicResource LineBrush}" BorderThickness="1,0,0,0">
                     <Grid>
@@ -337,8 +350,8 @@
                                     <TextBlock x:Name="CutCountLabel" Grid.Column="1" Foreground="{DynamicResource MutedBrush}" VerticalAlignment="Center"/>
                                 </Grid>
                                 <TextBlock Text="Red regions are the exact ranges CutFlow will remove. Keep removes a marker without deleting its audio." FontSize="12" Foreground="{DynamicResource MutedBrush}" Margin="0,3,0,7" TextWrapping="Wrap"/>
-                                <Grid MinHeight="100" MaxHeight="172" Margin="0,0,0,2">
-                                    <ListBox x:Name="CutsList" MinHeight="100" MaxHeight="172" SelectionMode="Extended" SelectionChanged="CutsList_SelectionChanged" PreviewMouseRightButtonDown="CutsList_PreviewMouseRightButtonDown" ScrollViewer.VerticalScrollBarVisibility="Auto" ToolTip="Select one or more pauses. Ctrl-click toggles items; Shift-click selects a range.">
+                                <Grid MinHeight="120" MaxHeight="280" Margin="0,0,0,2">
+                                    <ListBox x:Name="CutsList" MinHeight="120" MaxHeight="280" SelectionMode="Extended" SelectionChanged="CutsList_SelectionChanged" PreviewMouseRightButtonDown="CutsList_PreviewMouseRightButtonDown" ScrollViewer.VerticalScrollBarVisibility="Auto" ToolTip="Select one or more pauses. Ctrl-click toggles items; Shift-click selects a range.">
                                         <ListBox.ItemTemplate>
                                             <DataTemplate>
                                                 <StackPanel Margin="8,5" MinWidth="0">

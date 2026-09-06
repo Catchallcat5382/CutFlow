@@ -78,11 +78,14 @@ public partial class MainWindow : Window
     private int _backgroundPreviewGeneration;
     private int _detectorGeneration;
     private int _previewOpenGeneration;
+    private readonly DispatcherTimer _audioRecoveryTimer;
+    private readonly List<(double offsetStart, double offsetEnd)> _regionClipboard = new();
+    private bool _exportInProgress;
 
     private sealed record TutorialStep(string Title, string Body, Func<FrameworkElement?> Target, string? ActionKey);
     private List<TutorialStep>? _tutorialSteps;
 
-    private const int CurrentProjectSchema = 53;
+    private const int CurrentProjectSchema = 54;
     private const int CurrentDetectorSchema = 53;
     private AppSettings AppSettings => ((App)Application.Current).Settings;
     private static void TraceAction(string action) => App.RecordAction(action);
@@ -139,6 +142,18 @@ public partial class MainWindow : Window
 
         _saveToastTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(1600) };
         _saveToastTimer.Tick += (_, _) => { _saveToastTimer.Stop(); SaveToast.Visibility = Visibility.Collapsed; };
+
+        // WPF MediaElement can occasionally lose/reinitialize its audio renderer after a seek.
+        // Reassert volume/mute state once after the decoder settles. IMPORTANT: do NOT call Play()
+        // again while playback is already running; repeatedly re-starting MediaElement was the
+        // source of random headphone crackles/dropouts and "move backwards to get audio back".
+        _audioRecoveryTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(140) };
+        _audioRecoveryTimer.Tick += (_, _) =>
+        {
+            _audioRecoveryTimer.Stop();
+            if (!_project.HasMedia || !_mediaReady) return;
+            try { ApplyPreviewAudioState(); } catch { }
+        };
 
         Loaded += MainWindow_Loaded;
         Closing += MainWindow_Closing;
@@ -682,6 +697,108 @@ public partial class MainWindow : Window
         KeepSelectedSegments();
     }
 
+    private void CopyRegions_Click(object sender, RoutedEventArgs e) => CopySelectedRegionsToClipboard(removeOriginals: false);
+
+    private void CutRegionsClipboard_Click(object sender, RoutedEventArgs e) => CopySelectedRegionsToClipboard(removeOriginals: true);
+
+    private void PasteRegions_Click(object sender, RoutedEventArgs e)
+    {
+        if (!_project.HasMedia || _busy) return;
+        if (_regionClipboard.Count == 0)
+        {
+            SetStatus("Nothing is copied yet. Select one or more regions and press Ctrl+C first.");
+            PlayUiSound("error");
+            return;
+        }
+
+        var span = _regionClipboard.Max(x => x.offsetEnd);
+        var anchor = Math.Clamp(Timeline.Playhead, 0, _project.Media.DurationSeconds);
+        if (anchor + span > _project.Media.DurationSeconds) anchor = Math.Max(0, _project.Media.DurationSeconds - span);
+        _history.Push(_project);
+
+        var pastedStart = double.MaxValue;
+        var pastedEnd = 0.0;
+        foreach (var item in _regionClipboard)
+        {
+            var start = Math.Clamp(anchor + item.offsetStart, 0, _project.Media.DurationSeconds);
+            var end = Math.Clamp(anchor + item.offsetEnd, 0, _project.Media.DurationSeconds);
+            if (end - start < 0.003) continue;
+            _project.Segments.Add(new SilenceSegment
+            {
+                StartSeconds = start,
+                EndSeconds = end,
+                IsAutomatic = false,
+                IsCut = false,
+                IsIgnored = false
+            });
+            pastedStart = Math.Min(pastedStart, start);
+            pastedEnd = Math.Max(pastedEnd, end);
+        }
+
+        NormalizeAndMergeProjectRegions();
+        Timeline.Segments = _project.Segments;
+        var selected = _project.Segments
+            .Select((segment, index) => new { segment, index })
+            .Where(x => IsActiveRegion(x.segment) && x.segment.EndSeconds >= pastedStart - 0.02 && x.segment.StartSeconds <= pastedEnd + 0.02)
+            .Select(x => x.index)
+            .ToArray();
+        Timeline.SetSelectedSegments(selected, notify: false);
+        RefreshCutsList();
+        RefreshSummary();
+        RefreshHistoryButtons();
+        MarkDirty();
+        SetStatus($"Pasted {_regionClipboard.Count} region{(_regionClipboard.Count == 1 ? "" : "s")} at {FormatDuration(anchor)}.");
+        PlayUiSound("navigate");
+    }
+
+    private void CopySelectedRegionsToClipboard(bool removeOriginals)
+    {
+        if (!_project.HasMedia || _busy) return;
+        var selected = GetSelectedSegmentIndices()
+            .Where(i => IsActiveRegion(_project.Segments[i]))
+            .OrderBy(i => _project.Segments[i].StartSeconds)
+            .ToArray();
+        if (selected.Length == 0)
+        {
+            SetStatus("Select one or more red regions first.");
+            PlayUiSound("error");
+            return;
+        }
+
+        var baseStart = selected.Min(i => _project.Segments[i].StartSeconds);
+        _regionClipboard.Clear();
+        foreach (var i in selected)
+        {
+            var segment = _project.Segments[i];
+            _regionClipboard.Add((segment.StartSeconds - baseStart, segment.EndSeconds - baseStart));
+        }
+
+        if (removeOriginals)
+        {
+            _history.Push(_project);
+            foreach (var i in selected.OrderByDescending(x => x)) _project.Segments.RemoveAt(i);
+            NormalizeAndMergeProjectRegions();
+            Timeline.Segments = _project.Segments;
+            Timeline.ClearSelection(notify: false);
+            RefreshCutsList();
+            RefreshSummary();
+            RefreshHistoryButtons();
+            MarkDirty();
+        }
+
+        RefreshSelectionActionButtons();
+        SetStatus(removeOriginals
+            ? $"Cut {selected.Length} region{(selected.Length == 1 ? "" : "s")} to the region clipboard. Ctrl+V pastes at the playhead."
+            : $"Copied {selected.Length} region{(selected.Length == 1 ? "" : "s")} to the region clipboard. Ctrl+V pastes at the playhead.");
+        PlayUiSound("navigate");
+    }
+
+    private void NormalizeAndMergeProjectRegions()
+    {
+        if (!_project.HasMedia) return;
+        _project.Segments = NormalizeRegionsToFrameGrid(_project.Segments, _project.Media);
+    }
+
     private void SetManualRegionMode(bool enabled)
     {
         _manualRegionMode = enabled && _project.HasMedia;
@@ -717,10 +834,10 @@ public partial class MainWindow : Window
             IsIgnored = false
         };
         _project.Segments.Add(region);
-        _project.Segments = _project.Segments.OrderBy(x => x.StartSeconds).ThenBy(x => x.EndSeconds).ToList();
-        var index = _project.Segments.IndexOf(region);
+        NormalizeAndMergeProjectRegions();
+        var index = _project.Segments.FindIndex(s => IsActiveRegion(s) && s.StartSeconds <= start + 0.02 && s.EndSeconds >= end - 0.02);
         Timeline.Segments = _project.Segments;
-        Timeline.SetSelectedSegments(new[] { index }, notify: false);
+        if (index >= 0) Timeline.SetSelectedSegments(new[] { index }, notify: false);
         RefreshCutsList();
         RefreshSummary();
         RefreshHistoryButtons();
@@ -750,22 +867,23 @@ public partial class MainWindow : Window
             allowOneFrame: true);
         segment.StartSeconds = snapped.start;
         segment.EndSeconds = snapped.end;
-        _project.Segments = _project.Segments.OrderBy(x => x.StartSeconds).ThenBy(x => x.EndSeconds).ToList();
+        NormalizeAndMergeProjectRegions();
         Timeline.Segments = _project.Segments;
-        var newIndex = _project.Segments.IndexOf(segment);
-        Timeline.SetSelectedSegments(new[] { newIndex }, notify: false);
+        var newIndex = _project.Segments.FindIndex(s => IsActiveRegion(s) && s.StartSeconds <= snapped.start + 0.02 && s.EndSeconds >= snapped.end - 0.02);
+        if (newIndex >= 0) Timeline.SetSelectedSegments(new[] { newIndex }, notify: false);
         RefreshCutsList();
         RefreshSummary();
         RefreshHistoryButtons();
         MarkDirty();
-        if (segment.IsCut)
+        var resized = newIndex >= 0 && newIndex < _project.Segments.Count ? _project.Segments[newIndex] : null;
+        if (resized?.IsCut == true)
         {
             InvalidateSmoothPreview();
-            SetStatus($"CUT region resized to {segment.RangeLabel}. Press Play or Cut All to rebuild the continuous edited preview.");
+            SetStatus($"CUT region resized to {resized.RangeLabel}. Press Play or Cut All to rebuild the continuous edited preview.");
         }
         else
         {
-            SetStatus($"Region resized to {segment.RangeLabel}.");
+            SetStatus(resized is null ? "Region resized." : $"Region resized to {resized.RangeLabel}.");
         }
     }
 
@@ -921,11 +1039,20 @@ public partial class MainWindow : Window
         var activeSelected = selected.Count(i => IsActiveRegion(_project.Segments[i]));
         KeepButton.IsEnabled = activeSelected > 0 && !_busy;
         if (RemoveRegionButton is not null) RemoveRegionButton.IsEnabled = activeSelected > 0 && !_busy;
+        if (AddRegionButton is not null) AddRegionButton.IsEnabled = _project.HasMedia && !_busy;
+        if (RescanButton is not null) RescanButton.IsEnabled = _project.HasMedia && !_busy;
+        if (PasteRegionButton is not null) PasteRegionButton.IsEnabled = _project.HasMedia && !_busy && _regionClipboard.Count > 0;
         // Cut can commit/rebuild an already-red selection too. This avoids a dead-looking
         // button when the user selects a committed region and wants to apply the edit again.
         ApplyCutButton.IsEnabled = !_busy && _project.HasMedia && (activeSelected > 0 || _project.Segments.Any(IsActiveRegion));
         CutAllButton.IsEnabled = !_busy && _project.HasMedia;
+        if (ExportButton is not null) ExportButton.IsEnabled = !_busy && !_exportInProgress && _project.HasMedia;
         SidebarUndoButton.IsEnabled = _history.CanUndo;
+        if (ToolbarUndoButton is not null) ToolbarUndoButton.IsEnabled = _history.CanUndo;
+        if (ToolbarRedoButton is not null) ToolbarRedoButton.IsEnabled = _history.CanRedo;
+        if (CopyRegionsMenuItem is not null) CopyRegionsMenuItem.IsEnabled = activeSelected > 0 && !_busy;
+        if (CutRegionsMenuItem is not null) CutRegionsMenuItem.IsEnabled = activeSelected > 0 && !_busy;
+        if (PasteRegionsMenuItem is not null) PasteRegionsMenuItem.IsEnabled = _project.HasMedia && !_busy && _regionClipboard.Count > 0;
     }
 
     private async void ApplySelectedCut_Click(object sender, RoutedEventArgs e)
@@ -1063,6 +1190,18 @@ public partial class MainWindow : Window
         var keep = new MenuItem { Header = GetSelectedSegmentIndices().Length > 1 ? "Delete selected suggestions (keep audio)" : "Delete suggestion (keep audio)", InputGestureText = "Backspace" };
         keep.Click += (_, _) => KeepSelectedSegments();
         menu.Items.Add(keep);
+        menu.Items.Add(new Separator());
+        var copy = new MenuItem { Header = "Copy selected regions", InputGestureText = "Ctrl+C" };
+        copy.Click += (_, _) => CopySelectedRegionsToClipboard(removeOriginals: false);
+        copy.IsEnabled = GetSelectedSegmentIndices().Length > 0;
+        menu.Items.Add(copy);
+        var cutClipboard = new MenuItem { Header = "Cut selected regions to clipboard", InputGestureText = "Ctrl+X" };
+        cutClipboard.Click += (_, _) => CopySelectedRegionsToClipboard(removeOriginals: true);
+        cutClipboard.IsEnabled = GetSelectedSegmentIndices().Length > 0;
+        menu.Items.Add(cutClipboard);
+        var paste = new MenuItem { Header = "Paste regions at playhead", InputGestureText = "Ctrl+V", IsEnabled = _regionClipboard.Count > 0 };
+        paste.Click += (_, _) => PasteRegions_Click(this, new RoutedEventArgs());
+        menu.Items.Add(paste);
         menu.PlacementTarget = Timeline;
         menu.Placement = PlacementMode.MousePoint;
         menu.IsOpen = true;
@@ -1160,9 +1299,12 @@ public partial class MainWindow : Window
         if (estimatedMergedRanges.Count == 0) return false;
         var removedSeconds = estimatedMergedRanges.Sum(x => x.end - x.start);
         var sourceDuration = _project.Media.DurationSeconds;
-        var projectDir = _storage.GetProjectDirectory(_project);
-        var workingDir = Path.Combine(projectDir, "Working");
-        var jobDir = Path.Combine(workingDir, "Jobs", Guid.NewGuid().ToString("N"));
+        // Keep processor internals out of the user's human-readable project folder. The project
+        // itself contains the .cutflow file; temporary jobs and shortened working revisions live
+        // under CutFlow\Cache where users do not have to wonder what Jobs/Working means.
+        var projectCacheKey = _project.Id.ToString("N");
+        var workingDir = Path.Combine(_storage.WorkingDirectory, projectCacheKey);
+        var jobDir = Path.Combine(_storage.ProcessingDirectory, "Cuts", projectCacheKey, Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(jobDir);
         Directory.CreateDirectory(workingDir);
 
@@ -1201,6 +1343,9 @@ public partial class MainWindow : Window
                 FrameRate = _project.Media.FrameRate,
                 VideoDurationSeconds = _project.Media.VideoDurationSeconds,
                 AudioDurationSeconds = _project.Media.AudioDurationSeconds,
+                FormatStartSeconds = _project.Media.FormatStartSeconds,
+                VideoStartSeconds = _project.Media.VideoStartSeconds,
+                AudioStartSeconds = _project.Media.AudioStartSeconds,
                 HasVideo = _project.Media.HasVideo,
                 HasAudio = _project.Media.HasAudio,
                 VideoCodec = _project.Media.VideoCodec,
@@ -1462,6 +1607,9 @@ public partial class MainWindow : Window
                 FrameRate = source.Media.FrameRate,
                 VideoDurationSeconds = source.Media.VideoDurationSeconds,
                 AudioDurationSeconds = source.Media.AudioDurationSeconds,
+                FormatStartSeconds = source.Media.FormatStartSeconds,
+                VideoStartSeconds = source.Media.VideoStartSeconds,
+                AudioStartSeconds = source.Media.AudioStartSeconds,
                 HasVideo = source.Media.HasVideo,
                 HasAudio = source.Media.HasAudio,
                 VideoCodec = source.Media.VideoCodec,
@@ -1529,9 +1677,12 @@ public partial class MainWindow : Window
         // Outward frame snapping can make two fragments touch/overlap by a frame. Never draw
         // those as duplicate skinny boxes. Collapse them into one region so the timeline exactly
         // communicates one continuous deletion. Explicit Keep records stay separate/hidden.
+        // Treat microscopic gaps as one continuous region. Two detector/manual boxes that are
+        // separated by less than about one frame (or 18 ms for audio-only media) are visually and
+        // audibly one edit, and leaving that sliver behind is exactly what caused "double boxes".
         var mergeGap = media.HasVideo && media.FrameRate > 1 && media.FrameRate <= 240
-            ? (1.0 / media.FrameRate) * 0.55
-            : 0.006;
+            ? Math.Max(0.018, (1.0 / media.FrameRate) * 1.15)
+            : 0.018;
         var merged = new List<SilenceSegment>();
         foreach (var region in result.OrderBy(x => x.StartSeconds).ThenBy(x => x.EndSeconds))
         {
@@ -1597,7 +1748,7 @@ public partial class MainWindow : Window
         var merged = new List<(double start, double end)>();
         foreach (var r in sorted)
         {
-            if (merged.Count == 0 || r.start > merged[^1].end + 0.0005) merged.Add(r);
+            if (merged.Count == 0 || r.start > merged[^1].end + 0.018) merged.Add(r);
             else merged[^1] = (merged[^1].start, Math.Max(merged[^1].end, r.end));
         }
         return merged;
@@ -1837,12 +1988,27 @@ public partial class MainWindow : Window
         await Task.CompletedTask;
     }
 
+    private void ApplyPreviewAudioState()
+    {
+        if (Preview is null) return;
+        Preview.IsMuted = false;
+        Preview.Balance = 0;
+        Preview.Volume = Math.Clamp(VolumeSlider?.Value ?? AppSettings.PlaybackVolume, 0, 1);
+    }
+
+    private void ScheduleAudioRecovery(bool resumePlayback)
+    {
+        // The caller still tells us whether playback is active for readability, but recovery now
+        // only reapplies device state; it never restarts MediaElement mid-stream.
+        _ = resumePlayback;
+        _audioRecoveryTimer.Stop();
+        _audioRecoveryTimer.Start();
+    }
+
     private void StartMediaPlayback()
     {
         if (!_mediaReady || !_project.HasMedia) return;
-        Preview.IsMuted = false;
-        Preview.Balance = 0;
-        Preview.Volume = Math.Clamp(VolumeSlider.Value, 0, 1);
+        ApplyPreviewAudioState();
         Preview.ScrubbingEnabled = false;
         SyncNextCutIndex(CurrentSourcePositionSafe());
         Preview.Play();
@@ -1885,6 +2051,14 @@ public partial class MainWindow : Window
         if (!_project.HasMedia || !_isPlaying || _timelineScrubbing || !_mediaReady) return;
         try
         {
+            var now = _playbackClock.Elapsed.TotalMilliseconds;
+            var needsCutBoundaryPolling = !_usingSmoothPreview && _project.PreviewWithoutSilence && _appliedCuts.Count > 0;
+            // Reading MediaElement.Position is a cross-component call into the Windows media
+            // pipeline. Poll it quickly only while TEST cuts need boundary timing. Normal playback
+            // uses at most ~24 UI polls/sec; the video/audio decoder itself keeps playing at full
+            // frame/sample rate, but the editor stops wasting CPU asking for the clock 30-60x/sec.
+            if (!needsCutBoundaryPolling && now - _lastUiRefreshMs < Math.Max(_uiRefreshIntervalMs, 1000.0 / 24.0)) return;
+
             var mediaSeconds = Preview.Position.TotalSeconds;
             var seconds = _usingSmoothPreview ? PreviewToSourceTime(mediaSeconds) : mediaSeconds;
 
@@ -1906,6 +2080,7 @@ public partial class MainWindow : Window
                     {
                         var jumpTo = Math.Clamp(region.EndSeconds, 0, _project.Media.DurationSeconds);
                         Preview.Position = TimeSpan.FromSeconds(jumpTo);
+                        ScheduleAudioRecovery(resumePlayback: true);
                         _nextCutIndex++;
                         _project.LastPlayheadSeconds = jumpTo;
                         Timeline.Playhead = jumpTo;
@@ -1916,7 +2091,9 @@ public partial class MainWindow : Window
             }
 
             _project.LastPlayheadSeconds = seconds;
-            var now = _playbackClock.Elapsed.TotalMilliseconds;
+            // Do not poke MediaElement's audio device on a timer. Volume/mute are applied on media
+            // open, explicit volume changes and shortly after a seek. Periodically reassigning them
+            // during playback can cause audible dropouts on some Windows audio drivers.
             if (now - _lastUiRefreshMs < _uiRefreshIntervalMs) return;
             _lastUiRefreshMs = now;
             Timeline.Playhead = seconds;
@@ -1939,9 +2116,7 @@ public partial class MainWindow : Window
         try
         {
             _mediaReady = true;
-            Preview.IsMuted = false;
-            Preview.Balance = 0;
-            Preview.Volume = Math.Clamp(VolumeSlider.Value, 0, 1);
+            ApplyPreviewAudioState();
             var sourceSeconds = Math.Clamp(_pendingSourcePosition >= 0 ? _pendingSourcePosition : _project.LastPlayheadSeconds, 0, _project.Media.DurationSeconds);
             var mediaSeconds = _usingSmoothPreview ? SourceToPreviewTime(sourceSeconds) : sourceSeconds;
             Preview.Position = TimeSpan.FromSeconds(Math.Max(0, mediaSeconds));
@@ -2014,6 +2189,7 @@ public partial class MainWindow : Window
             _pendingSourcePosition = seconds;
             _mediaReady = false;
         }
+        if (_mediaReady) ScheduleAudioRecovery(resumePlayback: shouldContinue);
 
         _project.LastPlayheadSeconds = seconds;
         Timeline.Playhead = seconds;
@@ -2428,12 +2604,18 @@ public partial class MainWindow : Window
         Preview.IsMuted = false;
         Preview.Balance = 0;
         Preview.Volume = value;
+        ScheduleAudioRecovery(resumePlayback: _isPlaying);
     }
 
     private async void ExportMedia_Click(object sender, RoutedEventArgs e)
     {
         TraceAction("Open export flow");
         if (_busy || !_project.HasMedia) return;
+        if (_exportInProgress)
+        {
+            SetStatus("An export is already running in the background. Double-click the CutFlow Export tray icon to see progress.");
+            return;
+        }
 
         var pendingIndices = _project.Segments
             .Select((segment, index) => new { segment, index })
@@ -2458,19 +2640,110 @@ public partial class MainWindow : Window
         AdvanceTutorialOn("export-opened");
         var dialog = new ExportWindow(_project, AppSettings) { Owner = this };
         if (dialog.ShowDialog() != true || dialog.Result is not ExportOptions options) return;
+        try { await ((App)Application.Current).SettingsStore.SaveAsync(AppSettings); } catch { }
+        await StartBackgroundExportAsync(options);
+    }
 
-        var exportCompleted = false;
-        await RunBusyAsync("Exporting media", "Preparing your export…", async token =>
+    private async Task StartBackgroundExportAsync(ExportOptions options)
+    {
+        if (_exportInProgress) return;
+        // Export already runs in a completely separate CutFlow worker, so crippling FFmpeg to
+        // Idle priority / two CPU threads only makes a 4-minute project take tens of minutes.
+        // Keep the worker isolated, but let the encoder use normal priority and enough cores.
+        options.LowPriority = false;
+        if (options.VideoThreads <= 0) options.VideoThreads = Math.Clamp(Environment.ProcessorCount - 1, 2, 12);
+        if (string.IsNullOrWhiteSpace(options.SpeedMode)) options.SpeedMode = "Fast";
+        options.VideoPreset = options.SpeedMode.Equals("Quality", StringComparison.OrdinalIgnoreCase)
+            ? "medium"
+            : options.SpeedMode.Equals("Balanced", StringComparison.OrdinalIgnoreCase) ? "veryfast" : "ultrafast";
+        var destinationDirectory = Path.GetDirectoryName(options.DestinationPath);
+        if (!string.IsNullOrWhiteSpace(destinationDirectory)) Directory.CreateDirectory(destinationDirectory);
+
+        var jobDir = Path.Combine(_storage.ProcessingDirectory, "Exports", Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(jobDir);
+        var jobPath = Path.Combine(jobDir, "job.json");
+        var resultPath = Path.Combine(jobDir, "result.json");
+        var progressPath = Path.Combine(jobDir, "progress.json");
+        var cancelPath = Path.Combine(jobDir, "cancel.request");
+        var parentHandle = new WindowInteropHelper(this).Handle;
+
+        var job = new RenderWorkerJob
         {
-            var status = new Progress<string>(s => SetOperation(s, null));
-            await _ffmpeg.EnsureAvailableAsync(status, token);
-            var progress = new Progress<double>(p => SetOperation($"Rendering your edited media… {p * 100:0}%", p * 100));
-            await _ffmpeg.ExportAsync(_project, options, progress, token);
-            exportCompleted = true;
-            SetOperation("Export complete", 100);
-        });
-        if (!_closingInProgress && exportCompleted)
-            MessageBox.Show($"Export complete.\n\n{options.DestinationPath}", "CutFlow", MessageBoxButton.OK, MessageBoxImage.Information);
+            JobKind = "Export",
+            ProjectName = _project.Name,
+            SourcePath = _project.SourcePath,
+            DestinationPath = options.DestinationPath,
+            ResultPath = resultPath,
+            ProgressPath = progressPath,
+            CancelPath = cancelPath,
+            Media = new MediaInfo
+            {
+                DurationSeconds = _project.Media.DurationSeconds,
+                Width = _project.Media.Width,
+                Height = _project.Media.Height,
+                FrameRate = _project.Media.FrameRate,
+                VideoDurationSeconds = _project.Media.VideoDurationSeconds,
+                AudioDurationSeconds = _project.Media.AudioDurationSeconds,
+                FormatStartSeconds = _project.Media.FormatStartSeconds,
+                VideoStartSeconds = _project.Media.VideoStartSeconds,
+                AudioStartSeconds = _project.Media.AudioStartSeconds,
+                HasVideo = _project.Media.HasVideo,
+                HasAudio = _project.Media.HasAudio,
+                VideoCodec = _project.Media.VideoCodec,
+                AudioCodec = _project.Media.AudioCodec
+            },
+            Silence = CloneSilenceSettings(_project.Silence),
+            ExportOptions = options,
+            ParentWindowHandle = parentHandle.ToInt64(),
+            ParentProcessId = Environment.ProcessId
+        };
+        await File.WriteAllTextAsync(jobPath, JsonSerializer.Serialize(job, new JsonSerializerOptions { WriteIndented = true }));
+
+        var executable = Environment.ProcessPath;
+        if (string.IsNullOrWhiteSpace(executable) || !File.Exists(executable)) executable = Path.Combine(AppContext.BaseDirectory, "CutFlow.exe");
+        if (!File.Exists(executable)) throw new InvalidOperationException("CutFlow could not locate its background export worker.");
+
+        var workerPsi = new ProcessStartInfo(executable) { UseShellExecute = false, WorkingDirectory = AppContext.BaseDirectory, CreateNoWindow = true };
+        workerPsi.ArgumentList.Add("--export-worker");
+        workerPsi.ArgumentList.Add(jobPath);
+        var worker = Process.Start(workerPsi) ?? throw new InvalidOperationException("CutFlow could not start the background export worker.");
+
+        var monitorPsi = new ProcessStartInfo(executable) { UseShellExecute = false, WorkingDirectory = AppContext.BaseDirectory };
+        monitorPsi.ArgumentList.Add("--export-monitor");
+        monitorPsi.ArgumentList.Add(jobPath);
+        try { Process.Start(monitorPsi); } catch { }
+
+        _exportInProgress = true;
+        RefreshSelectionActionButtons();
+        SetStatus($"Exporting in the background → {options.DestinationPath}");
+        PlayUiSound("navigate");
+
+        try
+        {
+            RenderWorkerResult? result = null;
+            while (result is null && IsLoaded)
+            {
+                if (File.Exists(resultPath)) result = await ReadRenderWorkerResultAsync(resultPath, CancellationToken.None);
+                if (result is not null) break;
+                if (worker.HasExited && !File.Exists(resultPath))
+                    throw new InvalidOperationException($"The CutFlow Export worker closed unexpectedly (exit code {worker.ExitCode}).");
+                await Task.Delay(180);
+            }
+            if (result is null) return;
+            if (!result.Success) throw new InvalidOperationException(string.IsNullOrWhiteSpace(result.Error) ? "Export failed." : result.Error);
+            SetStatus($"Export complete → {result.DestinationPath}");
+            PlayUiSound("success");
+        }
+        catch (Exception ex)
+        {
+            ShowError("CutFlow could not finish the export", ex);
+        }
+        finally
+        {
+            _exportInProgress = false;
+            try { worker.Dispose(); } catch { }
+            RefreshSelectionActionButtons();
+        }
     }
 
     private async void ExportProjectPackage_Click(object sender, RoutedEventArgs e)
@@ -2618,6 +2891,17 @@ public partial class MainWindow : Window
             SetStatus("Opened the CutFlow Projects folder.");
         }
         catch (Exception ex) { ShowError("Could not open the Projects folder", ex); }
+    }
+
+    private void OpenExportsFolder_Click(object sender, RoutedEventArgs e)
+    {
+        try
+        {
+            Directory.CreateDirectory(_storage.ExportsDirectory);
+            Process.Start(new ProcessStartInfo("explorer.exe", $"\"{_storage.ExportsDirectory}\"") { UseShellExecute = true });
+            SetStatus("Opened the CutFlow Exports folder.");
+        }
+        catch (Exception ex) { ShowError("Could not open the Exports folder", ex); }
     }
 
     private async void OpenProject_Click(object sender, RoutedEventArgs e)
@@ -2779,6 +3063,10 @@ public partial class MainWindow : Window
             // automatic regions merely because the list is empty; only an explicit Rescan may do that.
         }
 
+        // Normalize saved/manual regions on every open without re-running detection. This folds
+        // microscopic gaps and overlapping boxes into the exact same region model the current
+        // editor uses, so old projects cannot retain near-touching slivers.
+        _project.Segments = NormalizeRegionsToFrameGrid(_project.Segments, _project.Media);
         _project.SchemaVersion = CurrentProjectSchema;
         LoadProjectIntoUi();
         await _storage.AutosaveAsync(_project);
@@ -2836,22 +3124,39 @@ public partial class MainWindow : Window
 
     private void Undo_Click(object sender, RoutedEventArgs e)
     {
+        if (_busy) return;
         if (!_history.CanUndo) { SetStatus("Nothing to undo yet."); return; }
+        var target = _history.PeekUndo();
+        if (target is not null && !string.IsNullOrWhiteSpace(target.SourcePath) && !File.Exists(target.SourcePath))
+        {
+            SetStatus("That older media revision is no longer available, so CutFlow safely left the project unchanged instead of breaking playback.");
+            PlayUiSound("error");
+            return;
+        }
         PrepareForEditMutation();
         if (!_history.Undo(_project)) return;
         ApplyHistoryState();
-        SetStatus("Undo applied. Removed regions/suggestions were restored to the previous edit state.");
+        SetStatus("Undo applied.");
         PlayUiSound("undo");
         AdvanceTutorialOn("edit-action");
     }
 
     private void Redo_Click(object sender, RoutedEventArgs e)
     {
+        if (_busy) return;
         if (!_history.CanRedo) { SetStatus("Nothing to redo yet."); return; }
+        var target = _history.PeekRedo();
+        if (target is not null && !string.IsNullOrWhiteSpace(target.SourcePath) && !File.Exists(target.SourcePath))
+        {
+            SetStatus("That media revision is no longer available, so Redo was cancelled safely.");
+            PlayUiSound("error");
+            return;
+        }
         PrepareForEditMutation();
         if (!_history.Redo(_project)) return;
         ApplyHistoryState();
-        SetStatus("Redo applied. Press Play to rebuild the edited preview if needed.");
+        SetStatus("Redo applied.");
+        PlayUiSound("navigate");
     }
 
     private void ApplyHistoryState()
@@ -2875,6 +3180,8 @@ public partial class MainWindow : Window
         UndoMenuItem.IsEnabled = _history.CanUndo;
         RedoMenuItem.IsEnabled = _history.CanRedo;
         if (SidebarUndoButton is not null) SidebarUndoButton.IsEnabled = _history.CanUndo;
+        if (ToolbarUndoButton is not null) ToolbarUndoButton.IsEnabled = _history.CanUndo;
+        if (ToolbarRedoButton is not null) ToolbarRedoButton.IsEnabled = _history.CanRedo;
         if (ApplyCutButton is not null || CutAllButton is not null || KeepButton is not null) RefreshSelectionActionButtons();
     }
 
@@ -2905,6 +3212,8 @@ public partial class MainWindow : Window
             Preview.Volume = VolumeSlider.Value;
             VolumeLabel.Text = $"{VolumeSlider.Value * 100:0}%";
             _uiRefreshIntervalMs = 1000.0 / Math.Clamp(AppSettings.UiRefreshHz, 20, 60);
+            if (SidebarColumn is not null) SidebarColumn.Width = new GridLength(Math.Clamp(AppSettings.EditorSidebarWidth, 260, 650));
+            if (TimelineRow is not null) TimelineRow.Height = new GridLength(Math.Clamp(AppSettings.EditorTimelineHeight, 150, 520));
             _autosaveTimer.Interval = TimeSpan.FromSeconds(Math.Clamp(AppSettings.AutosaveSeconds, 15, 120));
             _autosaveTimer.Stop();
             _autosaveTimer.Start();
@@ -3231,6 +3540,8 @@ public partial class MainWindow : Window
                 fade.Completed += (_, _) => { OperationOverlay.Visibility = Visibility.Collapsed; OperationOverlay.Opacity = 1; };
                 OperationOverlay.BeginAnimation(OpacityProperty, fade);
                 RefreshSelectionActionButtons();
+                if (RescanButton is not null) RescanButton.IsEnabled = _project.HasMedia;
+                if (AddRegionButton is not null) AddRegionButton.IsEnabled = _project.HasMedia;
                 RefreshPlaybackButtons();
             }
         }
@@ -3316,6 +3627,10 @@ public partial class MainWindow : Window
         }
         if (e.Key == Key.F1) { StartTutorial_Click(sender, e); e.Handled = true; return; }
         if (Keyboard.FocusedElement is TextBoxBase) return;
+
+        if (Keyboard.Modifiers == ModifierKeys.Control && e.Key == Key.C) { CopyRegions_Click(sender, e); e.Handled = true; return; }
+        if (Keyboard.Modifiers == ModifierKeys.Control && e.Key == Key.X) { CutRegionsClipboard_Click(sender, e); e.Handled = true; return; }
+        if (Keyboard.Modifiers == ModifierKeys.Control && e.Key == Key.V) { PasteRegions_Click(sender, e); e.Handled = true; return; }
 
         if (e.Key == Key.Escape && _manualRegionMode) { SetManualRegionMode(false); SetStatus("Manual region mode off."); e.Handled = true; return; }
         if (KeyBindingService.Matches(AppSettings, "FullScreen", e)) { ToggleFullScreen(); e.Handled = true; return; }
@@ -3527,6 +3842,20 @@ public partial class MainWindow : Window
         if (_project.HasMedia) await SaveCurrentProjectAsync(false, false);
         ShowEditorView();
         await ImportMediaAsync(path);
+    }
+
+    private async void EditorSplitter_DragCompleted(object sender, System.Windows.Controls.Primitives.DragCompletedEventArgs e)
+    {
+        if (SidebarColumn is null) return;
+        AppSettings.EditorSidebarWidth = Math.Clamp(SidebarColumn.ActualWidth, 260, 650);
+        try { await ((App)Application.Current).SettingsStore.SaveAsync(AppSettings); } catch { }
+    }
+
+    private async void PreviewTimelineSplitter_DragCompleted(object sender, System.Windows.Controls.Primitives.DragCompletedEventArgs e)
+    {
+        if (TimelineRow is null) return;
+        AppSettings.EditorTimelineHeight = Math.Clamp(TimelineRow.ActualHeight, 150, 520);
+        try { await ((App)Application.Current).SettingsStore.SaveAsync(AppSettings); } catch { }
     }
 
     private void TitleBar_MouseLeftButtonDown(object sender, MouseButtonEventArgs e)

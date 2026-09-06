@@ -68,7 +68,7 @@ public sealed class FFmpegService
         RequireTools();
         var psi = CreateProcess(FfprobePath!);
         psi.ArgumentList.Add("-v"); psi.ArgumentList.Add("error");
-        psi.ArgumentList.Add("-show_entries"); psi.ArgumentList.Add("format=duration:stream=codec_type,codec_name,width,height,r_frame_rate,avg_frame_rate,duration,start_time");
+        psi.ArgumentList.Add("-show_entries"); psi.ArgumentList.Add("format=duration,start_time:stream=codec_type,codec_name,width,height,r_frame_rate,avg_frame_rate,duration,start_time");
         psi.ArgumentList.Add("-of"); psi.ArgumentList.Add("json");
         psi.ArgumentList.Add(sourcePath);
         psi.RedirectStandardOutput = true;
@@ -84,10 +84,14 @@ public sealed class FFmpegService
 
         using var doc = JsonDocument.Parse(json);
         var info = new MediaInfo();
-        if (doc.RootElement.TryGetProperty("format", out var format) && format.TryGetProperty("duration", out var durationProp))
+        if (doc.RootElement.TryGetProperty("format", out var format))
         {
-            if (double.TryParse(durationProp.GetString(), System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var duration))
+            if (format.TryGetProperty("duration", out var durationProp) &&
+                double.TryParse(durationProp.GetString(), System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var duration))
                 info.DurationSeconds = duration;
+            if (format.TryGetProperty("start_time", out var formatStartProp) &&
+                double.TryParse(formatStartProp.GetString(), System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var formatStart))
+                info.FormatStartSeconds = formatStart;
         }
 
         if (doc.RootElement.TryGetProperty("streams", out var streams))
@@ -110,6 +114,8 @@ public sealed class FFmpegService
                             : 30;
                     if (stream.TryGetProperty("duration", out var vd) && double.TryParse(vd.GetString(), System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var videoDuration))
                         info.VideoDurationSeconds = videoDuration;
+                    if (stream.TryGetProperty("start_time", out var vs) && double.TryParse(vs.GetString(), System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var videoStart))
+                        info.VideoStartSeconds = videoStart;
                 }
                 else if (type == "audio" && !info.HasAudio)
                 {
@@ -117,6 +123,8 @@ public sealed class FFmpegService
                     info.AudioCodec = stream.TryGetProperty("codec_name", out var c) ? c.GetString() ?? string.Empty : string.Empty;
                     if (stream.TryGetProperty("duration", out var ad) && double.TryParse(ad.GetString(), System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var audioDuration))
                         info.AudioDurationSeconds = audioDuration;
+                    if (stream.TryGetProperty("start_time", out var ast) && double.TryParse(ast.GetString(), System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var audioStart))
+                        info.AudioStartSeconds = audioStart;
                 }
             }
         }
@@ -296,9 +304,8 @@ public sealed class FFmpegService
     {
         RequireTools();
         if (string.IsNullOrWhiteSpace(options.DestinationPath)) throw new InvalidOperationException("Choose an export destination first.");
-
-        var kept = BuildKeptRanges(project.Media.DurationSeconds, project.Segments);
-        if (kept.Count == 0) throw new InvalidOperationException("Everything is marked for removal. Undo at least one cut before exporting.");
+        if (string.IsNullOrWhiteSpace(project.SourcePath) || !File.Exists(project.SourcePath))
+            throw new FileNotFoundException("The current CutFlow working media could not be found.", project.SourcePath);
 
         var destinationPath = options.DestinationPath;
         var extension = Path.GetExtension(destinationPath).ToLowerInvariant();
@@ -310,118 +317,427 @@ public sealed class FFmpegService
         var directory = Path.GetDirectoryName(destinationPath);
         if (!string.IsNullOrWhiteSpace(directory)) Directory.CreateDirectory(directory);
 
-        var outputDuration = kept.Sum(x => x.end - x.start);
-        var filterGraph = BuildFilterScript(project.Media, project.Silence, kept, includeVideo, includeAudio, options);
+        var kept = BuildKeptRanges(project.Media.DurationSeconds, project.Segments);
+        if (kept.Count == 0) throw new InvalidOperationException("Everything is marked for removal. Undo at least one cut before exporting.");
+        var hasVirtualTimelineCuts = kept.Count != 1 || kept[0].start > 0.0005 || Math.Abs(kept[0].end - project.Media.DurationSeconds) > 0.0005;
+
+        // Modern CutFlow projects physically apply Cut/Cut All to SourcePath before Export opens.
+        // That means the common export case is already a finished, shortened media file. Do not
+        // decode + filter + re-encode that video again just to save it somewhere else.
+        if (!hasVirtualTimelineCuts)
         {
-            // Some bundled/minimal FFmpeg builds do not expose -filter_complex_script.
-            // Passing the graph as one ArgumentList entry avoids shell quoting and works with those builds.
+            await ExportCurrentWorkingMediaAsync(project, options, includeVideo, includeAudio, progress, cancellationToken).ConfigureAwait(false);
+            return;
+        }
+
+        // Compatibility path for older projects that still have committed virtual cut markers.
+        await ExportFilteredTimelineAsync(project, options, kept, includeVideo, includeAudio, progress, cancellationToken).ConfigureAwait(false);
+    }
+
+    private async Task ExportCurrentWorkingMediaAsync(
+        CutFlowProject project,
+        ExportOptions options,
+        bool includeVideo,
+        bool includeAudio,
+        IProgress<double>? progress,
+        CancellationToken cancellationToken)
+    {
+        var destinationPath = options.DestinationPath;
+        var extension = Path.GetExtension(destinationPath).ToLowerInvariant();
+        var speedMode = NormalizeSpeedMode(options.SpeedMode);
+        var noVideoTransform = options.Width <= 0 && options.Height <= 0 && options.FrameRate <= 0.1;
+        var cleanupFilter = options.ApplyAudioCleanup ? AudioCleanupTransform(project.Silence) : "anull";
+        var needsAudioCleanup = includeAudio && !cleanupFilter.Equals("anull", StringComparison.OrdinalIgnoreCase);
+        var sourceExtension = Path.GetExtension(project.SourcePath).ToLowerInvariant();
+
+        // Absolute fastest case: the user wants the same container, Original resolution/FPS and
+        // no cleanup. This is a plain file copy of the already-cut working media, so a 4-minute
+        // project normally exports in seconds instead of being encoded for 30+ minutes.
+        if (speedMode == "Fast" && noVideoTransform && !needsAudioCleanup &&
+            includeVideo == project.Media.HasVideo && includeAudio == project.Media.HasAudio &&
+            sourceExtension.Equals(extension, StringComparison.OrdinalIgnoreCase))
+        {
+            await CopyFileWithProgressAsync(project.SourcePath, destinationPath, progress, cancellationToken).ConfigureAwait(false);
+            return;
+        }
+
+        var smartCopyVideo = speedMode == "Fast" && includeVideo && noVideoTransform && (extension is ".mp4" or ".mov" or ".mkv");
+        try
+        {
+            await RunDirectExportAsync(project, options, includeVideo, includeAudio, smartCopyVideo, cleanupFilter, progress, cancellationToken).ConfigureAwait(false);
+        }
+        catch (InvalidOperationException) when (smartCopyVideo)
+        {
+            // An unusual codec/container or a failed opening-seconds verification automatically
+            // falls back to fast GPU/CPU encoding. RunDirectExportAsync now stages its output, so
+            // do NOT delete an existing destination until a verified replacement is ready.
+            await RunDirectExportAsync(project, options, includeVideo, includeAudio, false, cleanupFilter, progress, cancellationToken).ConfigureAwait(false);
+        }
+    }
+
+    private async Task RunDirectExportAsync(
+        CutFlowProject project,
+        ExportOptions options,
+        bool includeVideo,
+        bool includeAudio,
+        bool smartCopyVideo,
+        string cleanupFilter,
+        IProgress<double>? progress,
+        CancellationToken cancellationToken)
+    {
+        var destinationPath = options.DestinationPath;
+        var extension = Path.GetExtension(destinationPath).ToLowerInvariant();
+        var speedMode = NormalizeSpeedMode(options.SpeedMode);
+        var stagingPath = BuildStagingExportPath(destinationPath);
+
+        try
+        {
             var psi = CreateProcess(FfmpegPath!);
             psi.ArgumentList.Add("-y");
             psi.ArgumentList.Add("-hide_banner");
-            if (options.LowPriority)
+            // Generate missing presentation timestamps instead of trusting a quirky MP4/MOV edit
+            // list. Smart Export also shifts the selected video/audio stream starts to zero below.
+            psi.ArgumentList.Add("-fflags"); psi.ArgumentList.Add("+genpts");
+
+            // Normalize input timestamps without doing extra disk I/O on normal files. When A/V
+            // already share the same start timestamp, read the source once and shift both together.
+            // Only files with different video/audio edit-list starts need the second input.
+            var videoStart = CleanStartTimestamp(project.Media.VideoStartSeconds);
+            var audioStart = CleanStartTimestamp(project.Media.AudioStartSeconds);
+            var separateAvInputs = includeVideo && includeAudio && Math.Abs(videoStart - audioStart) > 0.0005;
+            if (includeVideo)
             {
-                // Limit decoder work too. Output encoding is also limited below. This keeps
-                // preview generation from starving WPF while the progress overlay is open.
-                psi.ArgumentList.Add("-threads"); psi.ArgumentList.Add("1");
+                AddTimestampNormalizedInput(psi, project.SourcePath, videoStart);
+                if (includeAudio && separateAvInputs)
+                    AddTimestampNormalizedInput(psi, project.SourcePath, audioStart);
             }
-            psi.ArgumentList.Add("-i"); psi.ArgumentList.Add(project.SourcePath);
-            psi.ArgumentList.Add("-filter_complex"); psi.ArgumentList.Add(filterGraph);
+            else if (includeAudio)
+            {
+                AddTimestampNormalizedInput(psi, project.SourcePath, audioStart);
+            }
 
             if (includeVideo)
             {
-                psi.ArgumentList.Add("-map"); psi.ArgumentList.Add("[outv]");
-                psi.ArgumentList.Add("-c:v"); psi.ArgumentList.Add("libx264");
-                psi.ArgumentList.Add("-preset");
-                var preset = options.VideoPreset?.Trim().ToLowerInvariant();
-                if (preset is not ("ultrafast" or "superfast" or "veryfast" or "faster" or "fast" or "medium" or "slow")) preset = "fast";
-                psi.ArgumentList.Add(preset);
-                if (options.VideoThreads > 0)
+                psi.ArgumentList.Add("-map"); psi.ArgumentList.Add("0:v:0");
+                if (smartCopyVideo)
                 {
-                    psi.ArgumentList.Add("-threads");
-                    psi.ArgumentList.Add(Math.Clamp(options.VideoThreads, 1, 16).ToString());
+                    psi.ArgumentList.Add("-c:v"); psi.ArgumentList.Add("copy");
                 }
-                psi.ArgumentList.Add("-crf"); psi.ArgumentList.Add(Math.Clamp(options.VideoCrf, 14, 28).ToString());
-                psi.ArgumentList.Add("-pix_fmt"); psi.ArgumentList.Add("yuv420p");
+                else
+                {
+                    var transforms = VideoTransform(options, System.Globalization.CultureInfo.InvariantCulture);
+                    if (!transforms.Equals("null", StringComparison.OrdinalIgnoreCase))
+                    {
+                        psi.ArgumentList.Add("-vf"); psi.ArgumentList.Add(transforms);
+                    }
+                    await AddFastVideoEncoderAsync(psi, options, speedMode, cancellationToken).ConfigureAwait(false);
+                    psi.ArgumentList.Add("-pix_fmt"); psi.ArgumentList.Add("yuv420p");
+                }
             }
 
             if (includeAudio)
             {
-                psi.ArgumentList.Add("-map"); psi.ArgumentList.Add("[outa]");
-                switch (extension)
-                {
-                    case ".wav":
-                        psi.ArgumentList.Add("-c:a"); psi.ArgumentList.Add("pcm_s16le");
-                        break;
-                    case ".mp3":
-                        psi.ArgumentList.Add("-c:a"); psi.ArgumentList.Add("libmp3lame");
-                        psi.ArgumentList.Add("-b:a"); psi.ArgumentList.Add($"{Math.Clamp(options.AudioBitrateKbps, 128, 320)}k");
-                        break;
-                    default:
-                        psi.ArgumentList.Add("-c:a"); psi.ArgumentList.Add("aac");
-                        psi.ArgumentList.Add("-b:a"); psi.ArgumentList.Add($"{Math.Clamp(options.AudioBitrateKbps, 128, 320)}k");
-                        break;
-                }
+                // Most files use input 0 for both streams. Only mismatched A/V start timestamps
+                // create a second, independently shifted audio input.
+                psi.ArgumentList.Add("-map"); psi.ArgumentList.Add(includeVideo && separateAvInputs ? "1:a:0" : "0:a:0");
+                // Keep audio timestamps continuous from sample zero. This prevents filter lookahead
+                // or odd source edit lists from creating a tiny initial hole/dropout in the export.
+                var audioFilter = cleanupFilter.Equals("anull", StringComparison.OrdinalIgnoreCase)
+                    ? "aresample=async=1:first_pts=0"
+                    : cleanupFilter + ",aresample=async=1:first_pts=0";
+                psi.ArgumentList.Add("-af"); psi.ArgumentList.Add(audioFilter);
+                AddAudioEncoder(psi, extension, options.AudioBitrateKbps);
             }
 
+            psi.ArgumentList.Add("-map_metadata"); psi.ArgumentList.Add("0");
+            psi.ArgumentList.Add("-avoid_negative_ts"); psi.ArgumentList.Add("make_zero");
+
+            // Faststart costs a short final disk pass but prevents MP4/MOV players from seeing a
+            // half-initialized index at the beginning. The old optimization that skipped this in
+            // Fast mode saved seconds at most and was not worth fragile startup playback.
             if (extension is ".mp4" or ".mov" or ".m4a")
             {
                 psi.ArgumentList.Add("-movflags"); psi.ArgumentList.Add("+faststart");
             }
 
-            psi.ArgumentList.Add("-progress"); psi.ArgumentList.Add("pipe:1");
-            psi.ArgumentList.Add("-nostats");
-            psi.ArgumentList.Add(destinationPath);
-            psi.RedirectStandardOutput = true;
-            psi.RedirectStandardError = true;
+            await RunExportProcessAsync(psi, stagingPath, project.Media.DurationSeconds, options.LowPriority, progress, cancellationToken).ConfigureAwait(false);
 
-            using var process = Process.Start(psi) ?? throw new InvalidOperationException("Could not start FFmpeg export.");
-            if (options.LowPriority)
-            {
-                try { process.PriorityClass = ProcessPriorityClass.Idle; } catch { }
-            }
-            using var registration = cancellationToken.Register(() =>
-            {
-                try { if (!process.HasExited) process.Kill(true); } catch { }
-            });
+            // Never publish a Smart Export until its first seconds can actually be decoded and
+            // its A/V streams begin together. If stream-copy cannot satisfy this, the caller
+            // automatically falls back to the fast NVENC/ultrafast encoder path.
+            await VerifyExportStartAsync(stagingPath, includeVideo, includeAudio, project.Media.DurationSeconds, cancellationToken).ConfigureAwait(false);
 
-            var errorTask = process.StandardError.ReadToEndAsync(cancellationToken);
-            long lastExportProgressMs = 0;
-            while (!process.StandardOutput.EndOfStream)
-            {
-                string? line;
-                try
-                {
-                    // A broken encoder/filter must never leave CutFlow behind a permanent busy
-                    // overlay. FFmpeg's -progress stream normally emits lines continuously; if
-                    // it goes completely silent for a full minute on a working render, treat it
-                    // as stalled, terminate it, and return control to the editor with an error.
-                    line = await process.StandardOutput.ReadLineAsync()
-                        .WaitAsync(TimeSpan.FromSeconds(options.LowPriority ? 60 : 120), cancellationToken)
-                        .ConfigureAwait(false);
-                }
-                catch (TimeoutException)
-                {
-                    try { if (!process.HasExited) process.Kill(true); } catch { }
-                    throw new InvalidOperationException("Media processing stopped responding for too long. CutFlow cancelled it safely instead of leaving the editor frozen.");
-                }
-                if (line is null) break;
-                if (line.StartsWith("out_time_us=", StringComparison.OrdinalIgnoreCase) && long.TryParse(line[12..], out var us))
-                {
-                    var now = Environment.TickCount64;
-                    if (now - lastExportProgressMs >= 90)
-                    {
-                        lastExportProgressMs = now;
-                        progress?.Report(Math.Clamp((us / 1_000_000.0) / Math.Max(0.001, outputDuration), 0, 0.995));
-                    }
-                }
-            }
-            await process.WaitForExitAsync(cancellationToken).ConfigureAwait(false);
-            var error = await errorTask.ConfigureAwait(false);
-            cancellationToken.ThrowIfCancellationRequested();
-            if (process.ExitCode != 0)
-                throw new InvalidOperationException(string.IsNullOrWhiteSpace(error) ? "Media export failed." : error.Trim());
+            if (Path.GetFullPath(stagingPath).Equals(Path.GetFullPath(destinationPath), StringComparison.OrdinalIgnoreCase))
+                throw new InvalidOperationException("CutFlow could not create a safe staging file for export.");
+            File.Move(stagingPath, destinationPath, true);
             progress?.Report(1.0);
         }
+        finally
+        {
+            try { if (File.Exists(stagingPath)) File.Delete(stagingPath); } catch { }
+        }
+    }
+
+    private static string BuildStagingExportPath(string destinationPath)
+    {
+        var directory = Path.GetDirectoryName(destinationPath);
+        if (string.IsNullOrWhiteSpace(directory)) directory = Directory.GetCurrentDirectory();
+        var extension = Path.GetExtension(destinationPath);
+        var stem = Path.GetFileNameWithoutExtension(destinationPath);
+        return Path.Combine(directory, $".{stem}.cutflow-{Guid.NewGuid():N}{extension}");
+    }
+
+    private static double CleanStartTimestamp(double value)
+        => double.IsNaN(value) || double.IsInfinity(value) ? 0 : value;
+
+    private static void AddTimestampNormalizedInput(ProcessStartInfo psi, string sourcePath, double streamStartSeconds)
+    {
+        var start = CleanStartTimestamp(streamStartSeconds);
+        if (Math.Abs(start) > 0.0005)
+        {
+            psi.ArgumentList.Add("-itsoffset");
+            psi.ArgumentList.Add((-start).ToString("0.######", System.Globalization.CultureInfo.InvariantCulture));
+        }
+        psi.ArgumentList.Add("-i");
+        psi.ArgumentList.Add(sourcePath);
+    }
+
+    private async Task VerifyExportStartAsync(
+        string path,
+        bool expectVideo,
+        bool expectAudio,
+        double expectedDuration,
+        CancellationToken cancellationToken)
+    {
+        var info = await ProbeAsync(path, cancellationToken).ConfigureAwait(false);
+        if (expectVideo && !info.HasVideo) throw new InvalidOperationException("The exported video stream is missing.");
+        if (expectAudio && !info.HasAudio) throw new InvalidOperationException("The exported audio stream is missing.");
+
+        const double startTolerance = 0.12;
+        if (expectVideo && Math.Abs(info.VideoStartSeconds) > startTolerance)
+            throw new InvalidOperationException($"The fast export video starts at {info.VideoStartSeconds:0.###}s instead of zero.");
+        if (expectAudio && Math.Abs(info.AudioStartSeconds) > startTolerance)
+            throw new InvalidOperationException($"The fast export audio starts at {info.AudioStartSeconds:0.###}s instead of zero.");
+        if (expectVideo && expectAudio && Math.Abs(info.VideoStartSeconds - info.AudioStartSeconds) > 0.08)
+            throw new InvalidOperationException("The fast export audio/video start timestamps are not aligned.");
+        if (expectedDuration > 0.25 && Math.Abs(info.DurationSeconds - expectedDuration) > Math.Max(0.50, expectedDuration * 0.01))
+            throw new InvalidOperationException($"The fast export duration changed unexpectedly ({info.DurationSeconds:0.###}s vs {expectedDuration:0.###}s).");
+        if (expectVideo && expectAudio && info.VideoDurationSeconds > 0 && info.AudioDurationSeconds > 0 &&
+            Math.Abs(info.VideoDurationSeconds - info.AudioDurationSeconds) > 0.30)
+            throw new InvalidOperationException("The fast export audio/video durations are not aligned.");
+
+        // Decode only the first few seconds. This catches damaged/missing reference frames and
+        // timestamp corruption while adding only a tiny verification cost to a fast export.
+        var verifySeconds = Math.Clamp(Math.Min(expectedDuration, 2.5), 0.25, 2.5);
+        var psi = CreateProcess(FfmpegPath!);
+        psi.ArgumentList.Add("-hide_banner");
+        psi.ArgumentList.Add("-loglevel"); psi.ArgumentList.Add("error");
+        psi.ArgumentList.Add("-xerror");
+        psi.ArgumentList.Add("-t"); psi.ArgumentList.Add(verifySeconds.ToString("0.###", System.Globalization.CultureInfo.InvariantCulture));
+        psi.ArgumentList.Add("-i"); psi.ArgumentList.Add(path);
+        if (expectVideo) { psi.ArgumentList.Add("-map"); psi.ArgumentList.Add("0:v:0?"); }
+        if (expectAudio) { psi.ArgumentList.Add("-map"); psi.ArgumentList.Add("0:a:0?"); }
+        psi.ArgumentList.Add("-f"); psi.ArgumentList.Add("null");
+        psi.ArgumentList.Add("-");
+        psi.RedirectStandardOutput = true;
+        psi.RedirectStandardError = true;
+
+        using var process = Process.Start(psi) ?? throw new InvalidOperationException("Could not verify the beginning of the export.");
+        using var registration = cancellationToken.Register(() =>
+        {
+            try { if (!process.HasExited) process.Kill(true); } catch { }
+        });
+        var outputTask = process.StandardOutput.ReadToEndAsync(cancellationToken);
+        var errorTask = process.StandardError.ReadToEndAsync(cancellationToken);
+        await process.WaitForExitAsync(cancellationToken).ConfigureAwait(false);
+        _ = await outputTask.ConfigureAwait(false);
+        var error = await errorTask.ConfigureAwait(false);
+        if (process.ExitCode != 0)
+            throw new InvalidOperationException(string.IsNullOrWhiteSpace(error)
+                ? "The first seconds of the fast export did not decode cleanly."
+                : "The first seconds of the fast export did not decode cleanly: " + error.Trim());
+    }
+
+    private async Task ExportFilteredTimelineAsync(
+        CutFlowProject project,
+        ExportOptions options,
+        IReadOnlyList<(double start, double end)> kept,
+        bool includeVideo,
+        bool includeAudio,
+        IProgress<double>? progress,
+        CancellationToken cancellationToken)
+    {
+        var destinationPath = options.DestinationPath;
+        var extension = Path.GetExtension(destinationPath).ToLowerInvariant();
+        var outputDuration = kept.Sum(x => x.end - x.start);
+        var filterGraph = BuildFilterScript(project.Media, project.Silence, kept, includeVideo, includeAudio, options);
+        var speedMode = NormalizeSpeedMode(options.SpeedMode);
+
+        var psi = CreateProcess(FfmpegPath!);
+        psi.ArgumentList.Add("-y");
+        psi.ArgumentList.Add("-hide_banner");
+        psi.ArgumentList.Add("-i"); psi.ArgumentList.Add(project.SourcePath);
+        psi.ArgumentList.Add("-filter_complex"); psi.ArgumentList.Add(filterGraph);
+
+        if (includeVideo)
+        {
+            psi.ArgumentList.Add("-map"); psi.ArgumentList.Add("[outv]");
+            await AddFastVideoEncoderAsync(psi, options, speedMode, cancellationToken).ConfigureAwait(false);
+            psi.ArgumentList.Add("-pix_fmt"); psi.ArgumentList.Add("yuv420p");
+        }
+        if (includeAudio)
+        {
+            psi.ArgumentList.Add("-map"); psi.ArgumentList.Add("[outa]");
+            AddAudioEncoder(psi, extension, options.AudioBitrateKbps);
+        }
+        if (speedMode != "Fast" && (extension is ".mp4" or ".mov" or ".m4a"))
+        {
+            psi.ArgumentList.Add("-movflags"); psi.ArgumentList.Add("+faststart");
+        }
+
+        await RunExportProcessAsync(psi, destinationPath, outputDuration, options.LowPriority, progress, cancellationToken).ConfigureAwait(false);
+    }
+
+    private async Task AddFastVideoEncoderAsync(ProcessStartInfo psi, ExportOptions options, string speedMode, CancellationToken cancellationToken)
+    {
+        var useNvenc = speedMode != "Quality" && await CanUseNvencAsync(cancellationToken).ConfigureAwait(false);
+        if (useNvenc)
+        {
+            psi.ArgumentList.Add("-c:v"); psi.ArgumentList.Add("h264_nvenc");
+            psi.ArgumentList.Add("-preset"); psi.ArgumentList.Add(speedMode == "Fast" ? "p1" : "p4");
+            if (speedMode == "Fast")
+            {
+                psi.ArgumentList.Add("-tune"); psi.ArgumentList.Add("ll");
+            }
+            psi.ArgumentList.Add("-cq"); psi.ArgumentList.Add(Math.Clamp(options.VideoCrf + 1, 15, 28).ToString());
+            psi.ArgumentList.Add("-b:v"); psi.ArgumentList.Add("0");
+            return;
+        }
+
+        psi.ArgumentList.Add("-c:v"); psi.ArgumentList.Add("libx264");
+        psi.ArgumentList.Add("-preset");
+        psi.ArgumentList.Add(speedMode switch { "Fast" => "ultrafast", "Balanced" => "veryfast", _ => "medium" });
+        psi.ArgumentList.Add("-crf"); psi.ArgumentList.Add(Math.Clamp(options.VideoCrf, 14, 28).ToString());
+        var threads = options.VideoThreads > 0
+            ? Math.Clamp(options.VideoThreads, 1, 16)
+            : Math.Clamp(Environment.ProcessorCount - 1, 2, 12);
+        psi.ArgumentList.Add("-threads"); psi.ArgumentList.Add(threads.ToString());
+    }
+
+    private static void AddAudioEncoder(ProcessStartInfo psi, string extension, int bitrateKbps)
+    {
+        switch (extension)
+        {
+            case ".wav":
+                psi.ArgumentList.Add("-c:a"); psi.ArgumentList.Add("pcm_s16le");
+                break;
+            case ".mp3":
+                psi.ArgumentList.Add("-c:a"); psi.ArgumentList.Add("libmp3lame");
+                psi.ArgumentList.Add("-b:a"); psi.ArgumentList.Add($"{Math.Clamp(bitrateKbps, 128, 320)}k");
+                break;
+            default:
+                psi.ArgumentList.Add("-c:a"); psi.ArgumentList.Add("aac");
+                psi.ArgumentList.Add("-b:a"); psi.ArgumentList.Add($"{Math.Clamp(bitrateKbps, 128, 320)}k");
+                break;
+        }
+    }
+
+    private async Task RunExportProcessAsync(
+        ProcessStartInfo psi,
+        string destinationPath,
+        double outputDuration,
+        bool lowPriority,
+        IProgress<double>? progress,
+        CancellationToken cancellationToken)
+    {
+        psi.ArgumentList.Add("-progress"); psi.ArgumentList.Add("pipe:1");
+        psi.ArgumentList.Add("-nostats");
+        psi.ArgumentList.Add(destinationPath);
+        psi.RedirectStandardOutput = true;
+        psi.RedirectStandardError = true;
+
+        using var process = Process.Start(psi) ?? throw new InvalidOperationException("Could not start FFmpeg export.");
+        try { process.PriorityClass = lowPriority ? ProcessPriorityClass.BelowNormal : ProcessPriorityClass.Normal; } catch { }
+        using var registration = cancellationToken.Register(() =>
+        {
+            try { if (!process.HasExited) process.Kill(true); } catch { }
+        });
+
+        var errorTask = process.StandardError.ReadToEndAsync(cancellationToken);
+        long lastExportProgressMs = 0;
+        while (!process.StandardOutput.EndOfStream)
+        {
+            string? line;
+            try
+            {
+                line = await process.StandardOutput.ReadLineAsync()
+                    .WaitAsync(TimeSpan.FromSeconds(lowPriority ? 90 : 120), cancellationToken)
+                    .ConfigureAwait(false);
+            }
+            catch (TimeoutException)
+            {
+                try { if (!process.HasExited) process.Kill(true); } catch { }
+                throw new InvalidOperationException("Media export stopped reporting progress for too long and was cancelled safely.");
+            }
+            if (line is null) break;
+            if (line.StartsWith("out_time_us=", StringComparison.OrdinalIgnoreCase) && long.TryParse(line[12..], out var us))
+            {
+                var now = Environment.TickCount64;
+                if (now - lastExportProgressMs >= 80)
+                {
+                    lastExportProgressMs = now;
+                    progress?.Report(Math.Clamp((us / 1_000_000.0) / Math.Max(0.001, outputDuration), 0, 0.995));
+                }
+            }
+        }
+
+        await process.WaitForExitAsync(cancellationToken).ConfigureAwait(false);
+        var error = await errorTask.ConfigureAwait(false);
+        cancellationToken.ThrowIfCancellationRequested();
+        if (process.ExitCode != 0)
+            throw new InvalidOperationException(string.IsNullOrWhiteSpace(error) ? "Media export failed." : error.Trim());
+        progress?.Report(1.0);
+    }
+
+    private static async Task CopyFileWithProgressAsync(string sourcePath, string destinationPath, IProgress<double>? progress, CancellationToken cancellationToken)
+    {
+        if (Path.GetFullPath(sourcePath).Equals(Path.GetFullPath(destinationPath), StringComparison.OrdinalIgnoreCase))
+            throw new InvalidOperationException("Choose a different export destination from the current working media file.");
+
+        var stagingPath = BuildStagingExportPath(destinationPath);
+        try
+        {
+            const int bufferSize = 4 * 1024 * 1024;
+            await using var source = new FileStream(sourcePath, FileMode.Open, FileAccess.Read, FileShare.Read, bufferSize, FileOptions.Asynchronous | FileOptions.SequentialScan);
+            await using (var destination = new FileStream(stagingPath, FileMode.Create, FileAccess.Write, FileShare.Read, bufferSize, FileOptions.Asynchronous | FileOptions.SequentialScan))
+            {
+                var buffer = new byte[bufferSize];
+                long copied = 0;
+                var length = Math.Max(1L, source.Length);
+                while (true)
+                {
+                    var read = await source.ReadAsync(buffer.AsMemory(0, buffer.Length), cancellationToken).ConfigureAwait(false);
+                    if (read <= 0) break;
+                    await destination.WriteAsync(buffer.AsMemory(0, read), cancellationToken).ConfigureAwait(false);
+                    copied += read;
+                    progress?.Report(Math.Clamp(copied / (double)length, 0, 0.995));
+                }
+                await destination.FlushAsync(cancellationToken).ConfigureAwait(false);
+            }
+            File.Move(stagingPath, destinationPath, true);
+            progress?.Report(1.0);
+        }
+        finally
+        {
+            try { if (File.Exists(stagingPath)) File.Delete(stagingPath); } catch { }
+        }
+    }
+
+    private static string NormalizeSpeedMode(string? mode)
+    {
+        if (mode?.Equals("Quality", StringComparison.OrdinalIgnoreCase) == true) return "Quality";
+        if (mode?.Equals("Balanced", StringComparison.OrdinalIgnoreCase) == true) return "Balanced";
+        return "Fast";
     }
 
     public async Task CutExactRangesAsync(
@@ -730,7 +1046,7 @@ public sealed class FFmpegService
         {
             lines.Add($"{inputs}concat=n={kept.Count}:v=1:a=1[concatv][joineda];");
             lines.Add($"[concatv]{VideoTransform(options, inv)}[outv];");
-            lines.Add($"[joineda]{AudioCleanupTransform(silence)}[outa]");
+            lines.Add($"[joineda]{(options.ApplyAudioCleanup ? AudioCleanupTransform(silence) : "anull")}[outa]");
         }
         else if (includeVideo)
         {
@@ -740,7 +1056,7 @@ public sealed class FFmpegService
         else
         {
             lines.Add($"{inputs}concat=n={kept.Count}:v=0:a=1[joineda];");
-            lines.Add($"[joineda]{AudioCleanupTransform(silence)}[outa]");
+            lines.Add($"[joineda]{(options.ApplyAudioCleanup ? AudioCleanupTransform(silence) : "anull")}[outa]");
         }
 
         return string.Join(Environment.NewLine, lines);

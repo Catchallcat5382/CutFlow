@@ -1,3 +1,16 @@
+# CutFlow v3.26
+
+CutFlow is a local Windows voice-aware silence editor. v3.26 keeps the v3.25 Smart Export speed path and the stable Silero VAD cut engine, then hardens export startup timestamps, verifies the opening seconds before publishing, improves WPF preview/audio stability, and adds a proper persistent export-finished screen with Open in Folder + OK.
+
+## Normal workflow
+
+- First machine/repository setup: `setup.bat`
+- Build current installer: `build.bat`
+- Push source changes: `push.bat`
+- Build + publish current installer release: `release.bat`
+
+Successful builds place installer packages in `releases\vX.Y.Z` and update `releases\latest\CutFlow-Setup.exe`. Runtime project files live under `%LOCALAPPDATA%\CutFlow\Projects`; exports default to `%LOCALAPPDATA%\CutFlow\Exports`; worker/cache files are kept in the hidden `%LOCALAPPDATA%\CutFlow\Cache` folder.
+
 # CutFlow v3.23
 
 ## Install / release workflow

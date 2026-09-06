@@ -66,6 +66,21 @@ public partial class App : Application
                 monitor.Show();
                 return;
             }
+            if (e.Args.Length >= 2 && e.Args[0].Equals("--export-worker", StringComparison.OrdinalIgnoreCase))
+            {
+                ShutdownMode = ShutdownMode.OnExplicitShutdown;
+                var host = new ExportWorkerHost(e.Args[1]);
+                host.Start();
+                return;
+            }
+            if (e.Args.Length >= 2 && e.Args[0].Equals("--export-monitor", StringComparison.OrdinalIgnoreCase))
+            {
+                ShutdownMode = ShutdownMode.OnMainWindowClose;
+                var monitor = new RenderMonitorWindow(e.Args[1]);
+                MainWindow = monitor;
+                monitor.Show();
+                return;
+            }
             if (e.Args.Length >= 4 && e.Args[0].Equals("--uninstall-monitor", StringComparison.OrdinalIgnoreCase))
             {
                 ShutdownMode = ShutdownMode.OnMainWindowClose;

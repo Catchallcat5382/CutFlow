@@ -1,27 +1,15 @@
-# v3.23.2 validation
+# v3.26.0 validation
 
-- setup.bat uses an explicit project root for every Git command.
-- Git environment overrides are cleared before setup/push/release.
-- safe.directory is configured before repository validation.
-- unreadable `.git` metadata is backed up outside the project and reinitialized; source files are untouched.
-- setup is idempotent and can resume after a failed first run.
-- push.bat/release.bat use the same safe-directory hardening.
-- GitHub remote creation still avoids `gh repo create --source=.`.
-
-# CutFlow v3.23 validation notes
-
-Static validation completed in the build workspace:
-
-- All XAML files parse as XML, including the new uninstall confirmation and uninstall monitor windows.
-- All event-handler names referenced by XAML resolve to code-behind methods.
-- `CutFlow.csproj` parses as XML and is versioned 3.23.0.
-- Installer source is `installer/CutFlow.iss` and builds the app into `%LOCALAPPDATA%\Programs\CutFlow` with Inno Setup's automatic uninstaller enabled.
-- `build.bat` publishes the self-contained x64 app and compiles `CutFlow-Setup-vX.Y.Z.exe` through `ISCC.exe`.
-- `setup.bat` initializes Git/GitHub CLI/Inno Setup prerequisites and connects the local folder to the configured GitHub repository.
-- `push.bat` commits/pushes source; `release.bat` builds the installer, updates `releases\latest`, and publishes the installer asset to a matching GitHub Release.
-- The raw app EXE is not copied to `releases`; installer packages are the release artifact.
-- In-app uninstall is available only when an Inno Setup `unins*.exe` is present beside the installed app.
-- Optional user-data removal is off by default and targets `%LOCALAPPDATA%\CutFlow` only after installer-managed uninstall completes.
-- Project-editor close behavior hides the editor while autosaving and reopens Project Home; a close from Home exits the process.
-
-The Linux workspace cannot run the Microsoft Windows WPF compiler or Inno Setup compiler. `build.bat` on Windows remains the final compile/package validation.
+- Project version: 3.26.0. Project schema stays 54 and detector schema stays 53; this release intentionally does not force a rescan or alter VAD/cut detection.
+- All XAML files parse as XML and every referenced XAML event handler resolves to a C# method.
+- Modified C# files have balanced braces in static checks.
+- Smart Export uses timestamp-normalized video/audio inputs for stream copy and writes to a same-folder staging file before atomic publish.
+- The staged export is probed for zero-ish A/V starts, sane duration, and opening A/V alignment, then the first up-to-2.5 seconds are decoded with FFmpeg `-xerror`.
+- Stream-copy verification failures are handled by the existing fast re-encode fallback instead of publishing a damaged file.
+- Direct same-container file-copy export is staged + atomically moved.
+- Export audio ends with `aresample=async=1:first_pts=0` on the re-encode path to keep timestamps continuous from sample zero.
+- Preview no longer calls Play again from the seek-audio recovery timer and no longer reapplies volume/mute every 1.8 seconds during playback.
+- Normal playback throttles MediaElement.Position polling to roughly 24 Hz unless TEST-cut boundaries require faster polling.
+- Export monitor success remains open and exposes Open in Folder + OK; failure remains visible until OK.
+- Linux-side FFmpeg smoke test confirmed separate video/audio timestamp offsets can be normalized to approximately zero while stream-copying video and re-encoding audio, and the first 2.5 seconds decode cleanly with `-xerror`.
+- Actual Windows WPF/Inno compilation still needs to be performed by `build.bat` on Windows.

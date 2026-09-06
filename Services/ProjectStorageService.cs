@@ -15,15 +15,35 @@ public sealed class ProjectStorageService
 
     public string RootDirectory { get; }
     public string ProjectsDirectory { get; }
+    public string ExportsDirectory { get; }
+    public string CacheDirectory { get; }
+    public string ProcessingDirectory { get; }
+    public string WorkingDirectory { get; }
     public string StatePath { get; }
 
     public ProjectStorageService()
     {
         RootDirectory = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "CutFlow");
         ProjectsDirectory = Path.Combine(RootDirectory, "Projects");
+        ExportsDirectory = Path.Combine(RootDirectory, "Exports");
+        CacheDirectory = Path.Combine(RootDirectory, "Cache");
+        ProcessingDirectory = Path.Combine(CacheDirectory, "Processing");
+        WorkingDirectory = Path.Combine(CacheDirectory, "Working");
         StatePath = Path.Combine(RootDirectory, "appstate.json");
         Directory.CreateDirectory(ProjectsDirectory);
+        Directory.CreateDirectory(ExportsDirectory);
+        Directory.CreateDirectory(ProcessingDirectory);
+        Directory.CreateDirectory(WorkingDirectory);
+        // Internal worker/cache data is intentionally hidden from normal Explorer views. Human
+        // project files and exports stay visible under Projects and Exports.
+        try
+        {
+            var cacheInfo = new DirectoryInfo(CacheDirectory);
+            cacheInfo.Attributes |= FileAttributes.Hidden;
+        }
+        catch { }
         MigrateLegacyProjectsBestEffort();
+        HideLegacyInternalFoldersBestEffort();
     }
 
     // Legacy helper kept for old project references. New projects use human-readable folders.
@@ -249,6 +269,30 @@ public sealed class ProjectStorageService
         return project;
     }
 
+
+
+    private void HideLegacyInternalFoldersBestEffort()
+    {
+        try
+        {
+            if (!Directory.Exists(ProjectsDirectory)) return;
+            foreach (var projectDir in Directory.EnumerateDirectories(ProjectsDirectory))
+            {
+                foreach (var name in new[] { "Jobs", "Working" })
+                {
+                    var internalDir = Path.Combine(projectDir, name);
+                    if (!Directory.Exists(internalDir)) continue;
+                    try
+                    {
+                        var info = new DirectoryInfo(internalDir);
+                        info.Attributes |= FileAttributes.Hidden;
+                    }
+                    catch { }
+                }
+            }
+        }
+        catch { }
+    }
 
     private void MigrateLegacyProjectsBestEffort()
     {

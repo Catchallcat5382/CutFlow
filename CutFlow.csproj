@@ -14,9 +14,9 @@
     <RootNamespace>CutFlow</RootNamespace>
     <ApplicationManifest>app.manifest</ApplicationManifest>
     <ApplicationIcon>Assets\CutFlow.ico</ApplicationIcon>
-    <Version>3.23.2</Version>
-    <FileVersion>3.23.2.0</FileVersion>
-    <AssemblyVersion>3.23.2.0</AssemblyVersion>
+    <Version>3.26.0</Version>
+    <FileVersion>3.26.0.0</FileVersion>
+    <AssemblyVersion>3.26.0.0</AssemblyVersion>
     <PublishSingleFile>true</PublishSingleFile>
     <SelfContained>true</SelfContained>
     <RuntimeIdentifier>win-x64</RuntimeIdentifier>

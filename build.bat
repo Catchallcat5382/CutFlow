@@ -85,12 +85,29 @@ if not exist "%INSTALLER%" (
 for /f "delims=" %%H in ('powershell -NoProfile -Command "(Get-FileHash '%INSTALLER%' -Algorithm SHA256).Hash"') do set "INSTALLER_SHA=%%H"
 >"dist\installer\SHA256SUMS.txt" echo !INSTALLER_SHA!  CutFlow-Setup-v%APP_VERSION%.exe
 
+rem Every successful build is also the current local release.
+set "VERSION_RELEASE=%CD%\releases\v%APP_VERSION%"
+set "LATEST_RELEASE=%CD%\releases\latest"
+if not exist "%CD%\releases" mkdir "%CD%\releases" >nul 2>&1
+if exist "%VERSION_RELEASE%" rmdir /s /q "%VERSION_RELEASE%"
+mkdir "%VERSION_RELEASE%" >nul 2>&1
+if exist "%LATEST_RELEASE%" rmdir /s /q "%LATEST_RELEASE%"
+mkdir "%LATEST_RELEASE%" >nul 2>&1
+copy /y "%INSTALLER%" "%VERSION_RELEASE%\CutFlow-Setup-v%APP_VERSION%.exe" >nul || goto :fail
+copy /y "dist\installer\SHA256SUMS.txt" "%VERSION_RELEASE%\SHA256SUMS.txt" >nul || goto :fail
+copy /y "%INSTALLER%" "%LATEST_RELEASE%\CutFlow-Setup.exe" >nul || goto :fail
+copy /y "%INSTALLER%" "%LATEST_RELEASE%\CutFlow-Setup-v%APP_VERSION%.exe" >nul || goto :fail
+copy /y "dist\installer\SHA256SUMS.txt" "%LATEST_RELEASE%\SHA256SUMS.txt" >nul || goto :fail
+>"%LATEST_RELEASE%\VERSION.txt" echo %APP_VERSION%
+
 echo.
 echo ============================================================
 echo  BUILD SUCCESSFUL
 echo ============================================================
 echo  Installer: %INSTALLER%
 echo  Checksum:  dist\installer\SHA256SUMS.txt
+echo  Versioned: releases\v%APP_VERSION%\CutFlow-Setup-v%APP_VERSION%.exe
+echo  Latest:    releases\latest\CutFlow-Setup.exe
 echo.
 if "%NO_PAUSE%"=="0" pause
 exit /b 0

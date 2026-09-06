@@ -41,6 +41,11 @@ public sealed class MediaInfo
     // Per-stream durations are used by the cut verifier so audio and video are proven to stay aligned.
     public double VideoDurationSeconds { get; set; }
     public double AudioDurationSeconds { get; set; }
+    // Start timestamps matter for stream-copy exports. Some MP4/MOV files use edit lists or
+    // non-zero stream starts; blindly remuxing those can make the first second look/sound corrupt.
+    public double FormatStartSeconds { get; set; }
+    public double VideoStartSeconds { get; set; }
+    public double AudioStartSeconds { get; set; }
     public bool HasVideo { get; set; }
     public bool HasAudio { get; set; }
     public string VideoCodec { get; set; } = string.Empty;
@@ -184,6 +189,13 @@ public sealed class AppSettings
     public int UiRefreshHz { get; set; } = 30;
     public string DefaultExportFps { get; set; } = "Original";
     public string DefaultExportResolution { get; set; } = "Original";
+    public string DefaultExportSpeed { get; set; } = "Fast";
+    public bool ApplyCleanupOnExport { get; set; } = true;
+    // Empty means CutFlow uses %LOCALAPPDATA%\CutFlow\Exports. Once the user browses elsewhere,
+    // the chosen directory is remembered for future exports.
+    public string LastExportDirectory { get; set; } = string.Empty;
+    public double EditorSidebarWidth { get; set; } = 355;
+    public double EditorTimelineHeight { get; set; } = 245;
     public string WindowMode { get; set; } = "FullScreen";
     public bool SnappingEnabled { get; set; } = true;
     public double SnapThresholdSeconds { get; set; } = 0.08;
@@ -212,6 +224,8 @@ public sealed class AppSettings
 
 public sealed class RenderWorkerJob
 {
+    // "Cut" or "Export". The lightweight monitor uses this to present the right wording.
+    public string JobKind { get; set; } = "Cut";
     public string ProjectName { get; set; } = string.Empty;
     public string SourcePath { get; set; } = string.Empty;
     public string DestinationPath { get; set; } = string.Empty;
@@ -229,6 +243,7 @@ public sealed class RenderWorkerJob
     public string InputPlanHash { get; set; } = string.Empty;
     public long ParentWindowHandle { get; set; }
     public int ParentProcessId { get; set; }
+    public ExportOptions? ExportOptions { get; set; }
 }
 
 public sealed class RenderCutRange
@@ -240,6 +255,10 @@ public sealed class RenderCutRange
 public sealed class RenderWorkerProgress
 {
     public double Progress { get; set; }
+    // Negative means the worker does not have a useful ETA yet. Export workers populate this
+    // after roughly the first second of real media progress so the monitor does not sit on
+    // "Estimating…" for minutes on long files.
+    public double EstimatedSecondsRemaining { get; set; } = -1;
     public string Stage { get; set; } = string.Empty;
     public DateTime StartedUtc { get; set; }
     public DateTime UpdatedUtc { get; set; }
@@ -276,12 +295,16 @@ public sealed class ExportOptions
     public double FrameRate { get; set; }
     public int VideoCrf { get; set; } = 18;
     public int AudioBitrateKbps { get; set; } = 256;
-    [JsonIgnore]
     public string VideoPreset { get; set; } = "fast";
-    [JsonIgnore]
     public int VideoThreads { get; set; }
-    [JsonIgnore]
     public bool LowPriority { get; set; }
+    // Fast is the default: when resolution/FPS stay Original, CutFlow copies the already-cut
+    // video stream instead of re-encoding it. Balanced/Quality remain available when the user
+    // explicitly wants a heavier render.
+    public string SpeedMode { get; set; } = "Fast";
+    // Voice cleanup is intentionally independent from video smart-copy. When enabled CutFlow can
+    // still copy the video bit-for-bit and only process/re-encode the audio stream.
+    public bool ApplyAudioCleanup { get; set; } = true;
 
     [JsonIgnore]
     public bool AudioOnly => Format.Equals("MP3", StringComparison.OrdinalIgnoreCase) ||

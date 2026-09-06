@@ -154,6 +154,15 @@ git -C "%PROJECT_ROOT%" push -u origin main
 if errorlevel 1 (echo [ERROR] Initial GitHub push failed. & goto :SetupFailed)
 
 echo.
+echo [BUILD] Creating the current CutFlow installer and local release folders...
+call "%PROJECT_ROOT%\build.bat" --no-pause
+if errorlevel 1 (
+  echo [ERROR] GitHub setup succeeded, but the installer build failed.
+  echo         Fix the build error and run build.bat again.
+  goto :SetupFailed
+)
+
+echo.
 echo ============================================================
 echo  SETUP COMPLETE
 echo ============================================================
@@ -162,6 +171,7 @@ echo  GitHub:  https://github.com/!GITHUB_OWNER!/!GITHUB_REPO!
 echo  Build:   build.bat
 echo  Push:    push.bat
 echo  Release: release.bat
+echo  Installer: releases\latest\CutFlow-Setup.exe
 echo.
 echo GitHub/release settings live in tools\release-settings.cmd
 popd

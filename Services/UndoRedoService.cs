@@ -11,6 +11,9 @@ public sealed class UndoRedoService
     public bool CanUndo => _undo.Count > 0;
     public bool CanRedo => _redo.Count > 0;
 
+    public ProjectSnapshot? PeekUndo() => _undo.Count == 0 ? null : CloneSnapshot(_undo.Peek());
+    public ProjectSnapshot? PeekRedo() => _redo.Count == 0 ? null : CloneSnapshot(_redo.Peek());
+
     public void Clear()
     {
         _undo.Clear();
@@ -119,6 +122,11 @@ public sealed class UndoRedoService
         Width = media.Width,
         Height = media.Height,
         FrameRate = media.FrameRate,
+        VideoDurationSeconds = media.VideoDurationSeconds,
+        AudioDurationSeconds = media.AudioDurationSeconds,
+        FormatStartSeconds = media.FormatStartSeconds,
+        VideoStartSeconds = media.VideoStartSeconds,
+        AudioStartSeconds = media.AudioStartSeconds,
         HasVideo = media.HasVideo,
         HasAudio = media.HasAudio,
         VideoCodec = media.VideoCodec,

@@ -25,15 +25,10 @@ set "TAG=v%APP_VERSION%"
 set "INSTALLER=%PROJECT_ROOT%\dist\installer\CutFlow-Setup-v%APP_VERSION%.exe"
 if not exist "%INSTALLER%" (echo [ERROR] Missing %INSTALLER%. & popd & pause & exit /b 1)
 
-if not exist "%PROJECT_ROOT%\releases" mkdir "%PROJECT_ROOT%\releases"
-if exist "%PROJECT_ROOT%\releases\v%APP_VERSION%" rmdir /s /q "%PROJECT_ROOT%\releases\v%APP_VERSION%"
-mkdir "%PROJECT_ROOT%\releases\v%APP_VERSION%"
-if exist "%PROJECT_ROOT%\releases\latest" rmdir /s /q "%PROJECT_ROOT%\releases\latest"
-mkdir "%PROJECT_ROOT%\releases\latest"
-copy /y "%INSTALLER%" "%PROJECT_ROOT%\releases\v%APP_VERSION%\CutFlow-Setup-v%APP_VERSION%.exe" >nul
-copy /y "%PROJECT_ROOT%\dist\installer\SHA256SUMS.txt" "%PROJECT_ROOT%\releases\v%APP_VERSION%\SHA256SUMS.txt" >nul
-copy /y "%INSTALLER%" "%PROJECT_ROOT%\releases\latest\CutFlow-Setup.exe" >nul
-copy /y "%PROJECT_ROOT%\dist\installer\SHA256SUMS.txt" "%PROJECT_ROOT%\releases\latest\SHA256SUMS.txt" >nul
+set "LOCAL_RELEASE=%PROJECT_ROOT%\releases\v%APP_VERSION%\CutFlow-Setup-v%APP_VERSION%.exe"
+set "LOCAL_CHECKSUM=%PROJECT_ROOT%\releases\v%APP_VERSION%\SHA256SUMS.txt"
+if not exist "%LOCAL_RELEASE%" (echo [ERROR] build.bat did not create %LOCAL_RELEASE%. & popd & pause & exit /b 1)
+if not exist "%PROJECT_ROOT%\releases\latest\CutFlow-Setup.exe" (echo [ERROR] build.bat did not update releases\latest. & popd & pause & exit /b 1)
 
 rem Commit/push the source state first. Build outputs/releases are ignored by git on purpose.
 git -C "%PROJECT_ROOT%" add .
@@ -47,9 +42,9 @@ if errorlevel 1 (echo [ERROR] Source push failed. & popd & pause & exit /b 1)
 
 gh release view "%TAG%" -R "%GITHUB_OWNER%/%GITHUB_REPO%" >nul 2>&1
 if errorlevel 1 (
-  gh release create "%TAG%" "%INSTALLER%#CutFlow Setup v%APP_VERSION%" "%PROJECT_ROOT%\dist\installer\SHA256SUMS.txt#SHA-256 checksums" -R "%GITHUB_OWNER%/%GITHUB_REPO%" --title "CutFlow %TAG%" --generate-notes --latest
+  gh release create "%TAG%" "%LOCAL_RELEASE%#CutFlow Setup v%APP_VERSION%" "%LOCAL_CHECKSUM%#SHA-256 checksums" -R "%GITHUB_OWNER%/%GITHUB_REPO%" --title "CutFlow %TAG%" --generate-notes --latest
 ) else (
-  gh release upload "%TAG%" "%INSTALLER%#CutFlow Setup v%APP_VERSION%" "%PROJECT_ROOT%\dist\installer\SHA256SUMS.txt#SHA-256 checksums" -R "%GITHUB_OWNER%/%GITHUB_REPO%" --clobber
+  gh release upload "%TAG%" "%LOCAL_RELEASE%#CutFlow Setup v%APP_VERSION%" "%LOCAL_CHECKSUM%#SHA-256 checksums" -R "%GITHUB_OWNER%/%GITHUB_REPO%" --clobber
   gh release edit "%TAG%" -R "%GITHUB_OWNER%/%GITHUB_REPO%" --latest
 )
 if errorlevel 1 (echo [ERROR] GitHub Release failed. Local installer is still in releases\latest. & popd & pause & exit /b 1)
