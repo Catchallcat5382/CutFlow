@@ -53,6 +53,14 @@ if not defined APP_VERSION (
 )
 echo [VERSION] %APP_VERSION%
 
+if not exist "README.md" (
+  echo [ERROR] README.md is missing.
+  goto :fail
+)
+powershell -NoProfile -ExecutionPolicy Bypass -Command "$ErrorActionPreference='Stop'; $first=(Get-Content -LiteralPath 'README.md' -TotalCount 1); $required='# CutFlow %APP_VERSION%'; if ($first.Trim() -ne $required) { Write-Error ('README.md is stale. First line must be: ' + $required); exit 1 }"
+if errorlevel 1 goto :fail
+echo [README] Current for %APP_VERSION%
+
 if exist "dist" rmdir /s /q "dist"
 if exist "bin" rmdir /s /q "bin"
 if exist "obj" rmdir /s /q "obj"

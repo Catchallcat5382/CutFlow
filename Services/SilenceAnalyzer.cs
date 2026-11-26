@@ -16,6 +16,8 @@ namespace CutFlow.Services;
 /// </summary>
 public sealed class SilenceAnalyzer
 {
+    private const double PracticalRegionMergeGapSeconds = 0.08;
+
     public List<SilenceSegment> Analyze(AudioAnalysisResult analysis, SilenceSettings settings, IReadOnlyList<SilenceSegment>? previous = null)
         => AnalyzeInternal(analysis, settings, previous, DetectorPass.Visible);
 
@@ -472,7 +474,7 @@ public sealed class SilenceAnalyzer
         var result = new List<SilenceSegment>();
         foreach (var seg in sorted)
         {
-            if (result.Count == 0 || seg.StartSeconds > result[^1].EndSeconds + 0.0005)
+            if (result.Count == 0 || seg.StartSeconds > result[^1].EndSeconds + PracticalRegionMergeGapSeconds)
             {
                 seg.IsCut = false;
                 seg.IsIgnored = false;

@@ -46,6 +46,10 @@ public partial class MainWindow : Window
     private Rect _windowedBounds = new(80, 60, 1400, 880);
     private GridLength _sidebarWidth = new(355);
     private bool _usingSmoothPreview;
+    private bool _usingDecoderFallbackPreview;
+    private string? _decoderFallbackPreviewPath;
+    private string? _decoderFallbackPreviewSignature;
+    private CancellationTokenSource? _decoderFallbackPreviewCts;
     private string? _smoothPreviewPath;
     private string? _smoothPreviewSignature;
     private List<(double start, double end)> _smoothPreviewRanges = new();
@@ -81,12 +85,14 @@ public partial class MainWindow : Window
     private readonly DispatcherTimer _audioRecoveryTimer;
     private readonly List<(double offsetStart, double offsetEnd)> _regionClipboard = new();
     private bool _exportInProgress;
+    private bool _openingPreviewOnly;
 
     private sealed record TutorialStep(string Title, string Body, Func<FrameworkElement?> Target, string? ActionKey);
     private List<TutorialStep>? _tutorialSteps;
 
     private const int CurrentProjectSchema = 54;
     private const int CurrentDetectorSchema = 53;
+    private const double PracticalRegionMergeGapSeconds = 0.08;
     private AppSettings AppSettings => ((App)Application.Current).Settings;
     private static void TraceAction(string action) => App.RecordAction(action);
     // Visible red regions are simply editable removal markers. IsCut is used only on the temporary render clone.
@@ -99,6 +105,8 @@ public partial class MainWindow : Window
     public MainWindow()
     {
         InitializeComponent();
+        var runningVersion = typeof(MainWindow).Assembly.GetName().Version?.ToString(3);
+        if (!string.IsNullOrWhiteSpace(runningVersion)) Title = $"CutFlow {runningVersion}";
 
         Timeline.SeekRequested += (_, seconds) => SeekTo(seconds, markDirty: false, continuePlayback: false);
         Timeline.ScrubPreviewRequested += (_, seconds) => PreviewTimelinePosition(seconds);
@@ -398,6 +406,7 @@ public partial class MainWindow : Window
             _smoothPreviewSignature = null;
             _smoothPreviewRanges = new();
             _usingSmoothPreview = false;
+            InvalidateDecoderFallbackPreview();
             _project = newProject;
             _analysis = analysis;
             _history.Clear();
@@ -1681,8 +1690,8 @@ public partial class MainWindow : Window
         // separated by less than about one frame (or 18 ms for audio-only media) are visually and
         // audibly one edit, and leaving that sliver behind is exactly what caused "double boxes".
         var mergeGap = media.HasVideo && media.FrameRate > 1 && media.FrameRate <= 240
-            ? Math.Max(0.018, (1.0 / media.FrameRate) * 1.15)
-            : 0.018;
+            ? Math.Max(PracticalRegionMergeGapSeconds, (1.0 / media.FrameRate) * 1.15)
+            : PracticalRegionMergeGapSeconds;
         var merged = new List<SilenceSegment>();
         foreach (var region in result.OrderBy(x => x.StartSeconds).ThenBy(x => x.EndSeconds))
         {
@@ -1748,7 +1757,7 @@ public partial class MainWindow : Window
         var merged = new List<(double start, double end)>();
         foreach (var r in sorted)
         {
-            if (merged.Count == 0 || r.start > merged[^1].end + 0.018) merged.Add(r);
+            if (merged.Count == 0 || r.start > merged[^1].end + PracticalRegionMergeGapSeconds) merged.Add(r);
             else merged[^1] = (merged[^1].start, Math.Max(merged[^1].end, r.end));
         }
         return merged;
@@ -1958,7 +1967,7 @@ public partial class MainWindow : Window
         // v3.11 uses a physically shortened working media file after every confirmed cut.
         // Playback therefore has ONE source and never swaps to hidden cut proxies or seeks over
         // pending markers. This removes an entire class of decoder races/freezes.
-        if (_usingSmoothPreview || !IsLoadedPreviewPath(_project.SourcePath))
+        if (_usingSmoothPreview || (!_usingDecoderFallbackPreview && !IsLoadedPreviewPath(_project.SourcePath)))
         {
             Interlocked.Increment(ref _previewOpenGeneration);
             SwitchPreviewSource(_project.SourcePath, useSmoothPreview: false, sourceSeconds: seconds, playWhenOpened: true);
@@ -2116,7 +2125,6 @@ public partial class MainWindow : Window
         try
         {
             _mediaReady = true;
-            ApplyPreviewAudioState();
             var sourceSeconds = Math.Clamp(_pendingSourcePosition >= 0 ? _pendingSourcePosition : _project.LastPlayheadSeconds, 0, _project.Media.DurationSeconds);
             var mediaSeconds = _usingSmoothPreview ? SourceToPreviewTime(sourceSeconds) : sourceSeconds;
             Preview.Position = TimeSpan.FromSeconds(Math.Max(0, mediaSeconds));
@@ -2128,11 +2136,15 @@ public partial class MainWindow : Window
             if (_pendingPlayAfterMediaOpen)
             {
                 _pendingPlayAfterMediaOpen = false;
+                _openingPreviewOnly = false;
+                ApplyPreviewAudioState();
                 StartMediaPlayback();
             }
             else
             {
                 try { Preview.Pause(); } catch { }
+                _openingPreviewOnly = false;
+                ApplyPreviewAudioState();
                 _isPlaying = false;
                 RefreshPlaybackButtons();
             }
@@ -2152,6 +2164,7 @@ public partial class MainWindow : Window
         _mediaReady = false;
         _isPlaying = false;
         _pendingPlayAfterMediaOpen = false;
+        _openingPreviewOnly = false;
         RefreshPlaybackButtons();
         var message = FriendlyError(e.ErrorException ?? new InvalidOperationException("The preview decoder could not open this media."));
         SetStatus("Preview failed: " + message);
@@ -2162,6 +2175,14 @@ public partial class MainWindow : Window
             try { if (!string.IsNullOrWhiteSpace(_smoothPreviewPath) && File.Exists(_smoothPreviewPath)) File.Delete(_smoothPreviewPath); } catch { }
             InvalidateSmoothPreview();
             SwitchPreviewSource(_project.SourcePath, useSmoothPreview: false, sourceSeconds: sourceSeconds, playWhenOpened: false);
+        }
+        else if (!_usingDecoderFallbackPreview && IsLoadedPreviewPath(_project.SourcePath))
+        {
+            _ = BuildAndOpenDecoderFallbackPreviewAsync(_project.LastPlayheadSeconds);
+        }
+        else if (_usingDecoderFallbackPreview)
+        {
+            SetStatus("Preview failed even after making a Windows-compatible MP4 proxy. Cutting/export can still use the source file.");
         }
     }
 
@@ -2266,9 +2287,21 @@ public partial class MainWindow : Window
         _smoothPreviewCts?.Cancel();
         _smoothPreviewCts?.Dispose();
         _smoothPreviewCts = null;
+        _decoderFallbackPreviewCts?.Cancel();
+        _decoderFallbackPreviewCts?.Dispose();
+        _decoderFallbackPreviewCts = null;
 
         if (switchToSource && _usingSmoothPreview)
             SwitchPreviewSource(_project.SourcePath, useSmoothPreview: false, sourceSeconds: sourceSeconds, playWhenOpened: false);
+    }
+
+    private void InvalidateDecoderFallbackPreview()
+    {
+        _decoderFallbackPreviewCts?.Cancel();
+        _decoderFallbackPreviewCts = null;
+        _decoderFallbackPreviewPath = null;
+        _decoderFallbackPreviewSignature = null;
+        _usingDecoderFallbackPreview = false;
     }
 
     private void InvalidateSmoothPreview()
@@ -2454,7 +2487,96 @@ public partial class MainWindow : Window
         SwitchPreviewSource(_project.SourcePath, useSmoothPreview: false, sourceSeconds: CurrentSourcePositionSafe(), playWhenOpened: false);
     }
 
-    private void SwitchPreviewSource(string path, bool useSmoothPreview, double sourceSeconds, bool playWhenOpened)
+    private async Task BuildAndOpenDecoderFallbackPreviewAsync(double sourceSeconds)
+    {
+        if (!_project.HasMedia || !File.Exists(_project.SourcePath)) return;
+        if (_decoderFallbackPreviewCts is not null) return;
+
+        var signature = BuildDecoderFallbackPreviewSignature();
+        if (!string.IsNullOrWhiteSpace(_decoderFallbackPreviewPath) &&
+            _decoderFallbackPreviewSignature == signature &&
+            File.Exists(_decoderFallbackPreviewPath))
+        {
+            SwitchPreviewSource(_decoderFallbackPreviewPath, useSmoothPreview: false, sourceSeconds: sourceSeconds, playWhenOpened: false, useDecoderFallbackPreview: true);
+            return;
+        }
+
+        var cts = new CancellationTokenSource();
+        _decoderFallbackPreviewCts = cts;
+        try
+        {
+            SetStatus("This file imports fine, but Windows cannot preview it directly. Building MP4 preview…");
+            await _ffmpeg.EnsureAvailableAsync(null, cts.Token);
+            var cacheRoot = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "CutFlow", "PreviewCache");
+            Directory.CreateDirectory(cacheRoot);
+            var output = Path.Combine(cacheRoot, $"{_project.Id:N}-{signature[..16]}-decoder.mp4");
+            if (!File.Exists(output) || new FileInfo(output).Length < 1024)
+            {
+                var tempOutput = output + $".{Guid.NewGuid():N}.tmp.mp4";
+                var (w, h) = PreviewProxySize(_project.Media.Width, _project.Media.Height);
+                var options = new ExportOptions
+                {
+                    DestinationPath = tempOutput,
+                    Format = "MP4",
+                    Width = w,
+                    Height = h,
+                    FrameRate = _project.Media.FrameRate > 0 ? Math.Min(_project.Media.FrameRate, 30) : 30,
+                    VideoCrf = 28,
+                    AudioBitrateKbps = 192,
+                    VideoPreset = "ultrafast",
+                    VideoThreads = 1,
+                    LowPriority = true,
+                    ApplyAudioCleanup = false
+                };
+                var previewProject = new CutFlowProject
+                {
+                    SourcePath = _project.SourcePath,
+                    OriginalSourcePath = _project.OriginalSourcePath,
+                    Media = _project.Media,
+                    Silence = _project.Silence,
+                    Segments = new List<SilenceSegment>()
+                };
+                try
+                {
+                    var progress = new Progress<double>(p => SetStatus($"Building MP4 preview for this file type… {p * 100:0}%"));
+                    await _ffmpeg.ExportAsync(previewProject, options, progress, cts.Token);
+                    cts.Token.ThrowIfCancellationRequested();
+                    File.Move(tempOutput, output, true);
+                }
+                finally
+                {
+                    try { if (File.Exists(tempOutput)) File.Delete(tempOutput); } catch { }
+                }
+            }
+
+            cts.Token.ThrowIfCancellationRequested();
+            _decoderFallbackPreviewSignature = signature;
+            _decoderFallbackPreviewPath = output;
+            SwitchPreviewSource(output, useSmoothPreview: false, sourceSeconds: sourceSeconds, playWhenOpened: false, useDecoderFallbackPreview: true);
+            SetStatus("MP4 preview ready. The original file is still used for cuts and exports.");
+        }
+        catch (OperationCanceledException) { }
+        catch (Exception ex)
+        {
+            SetStatus("Could not build MP4 preview: " + FriendlyError(ex));
+        }
+        finally
+        {
+            if (ReferenceEquals(_decoderFallbackPreviewCts, cts)) _decoderFallbackPreviewCts = null;
+            cts.Dispose();
+        }
+    }
+
+    private string BuildDecoderFallbackPreviewSignature()
+    {
+        var sb = new StringBuilder("decoder-preview-v1|");
+        sb.Append(_project.SourcePath).Append('|');
+        try { sb.Append(File.GetLastWriteTimeUtc(_project.SourcePath).Ticks).Append('|').Append(new FileInfo(_project.SourcePath).Length); } catch { }
+        sb.Append('|').Append(_project.Media.Width).Append('x').Append(_project.Media.Height).Append('|').Append(_project.Media.FrameRate.ToString("0.###", System.Globalization.CultureInfo.InvariantCulture));
+        return Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(sb.ToString())));
+    }
+
+    private void SwitchPreviewSource(string path, bool useSmoothPreview, double sourceSeconds, bool playWhenOpened, bool useDecoderFallbackPreview = false)
     {
         if (string.IsNullOrWhiteSpace(path) || !File.Exists(path)) return;
         sourceSeconds = Math.Clamp(sourceSeconds, 0, _project.Media.DurationSeconds);
@@ -2463,11 +2585,16 @@ public partial class MainWindow : Window
         _pendingPlayAfterMediaOpen = playWhenOpened;
         _pendingSourcePosition = sourceSeconds;
         _usingSmoothPreview = useSmoothPreview;
+        _usingDecoderFallbackPreview = useDecoderFallbackPreview;
         _mediaReady = false;
         _loadedPreviewPath = path;
         Preview.Source = new Uri(path, UriKind.Absolute);
         RefreshPlaybackButtons();
-        if (playWhenOpened)
+        _openingPreviewOnly = !playWhenOpened;
+        if (_openingPreviewOnly)
+            Preview.IsMuted = true;
+
+        if (playWhenOpened || _openingPreviewOnly)
         {
             Dispatcher.BeginInvoke(new Action(() =>
             {
@@ -3591,7 +3718,9 @@ public partial class MainWindow : Window
     {
         SetStatus(FriendlyError(ex));
         PlayUiSound("error");
-        MessageBox.Show(FriendlyError(ex), title, MessageBoxButton.OK, MessageBoxImage.Error);
+        var runningVersion = typeof(MainWindow).Assembly.GetName().Version?.ToString(3);
+        var versionedTitle = string.IsNullOrWhiteSpace(runningVersion) ? title : $"{title} — v{runningVersion}";
+        MessageBox.Show(FriendlyError(ex), versionedTitle, MessageBoxButton.OK, MessageBoxImage.Error);
     }
 
     private static string FriendlyError(Exception ex)

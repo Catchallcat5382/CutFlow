@@ -11,6 +11,8 @@ namespace CutFlow.Services;
 public sealed class FFmpegService
 {
     private const string WindowsBuildUrl = "https://www.gyan.dev/ffmpeg/builds/ffmpeg-release-essentials.zip";
+    private const double PracticalRegionMergeGapSeconds = 0.08;
+    private const int StreamingAudioCutThreshold = 80;
     private readonly string _toolRoot;
     private bool? _nvencAvailable;
 
@@ -761,15 +763,15 @@ public sealed class FFmpegService
             .Where(r => r.end - r.start >= 0.003)
             .OrderBy(r => r.start))
         {
-            if (merged.Count == 0 || raw.start > merged[^1].end + 0.0005) merged.Add(raw);
+            if (merged.Count == 0 || raw.start > merged[^1].end + PracticalRegionMergeGapSeconds) merged.Add(raw);
             else merged[^1] = (merged[^1].start, Math.Max(merged[^1].end, raw.end));
         }
         if (merged.Count == 0) throw new InvalidOperationException("There are no valid ranges to remove.");
 
-        // Build the exact ranges we KEEP and concatenate those in one FFmpeg pass. This avoids the
+        // Build the exact ranges we KEEP. Audio concatenates those kept ranges sample-accurately;
+        // video removes the matching cut ranges while collapsing timestamps. This avoids the
         // duration drift caused by select+setpts=N/(fps*TB), especially with 29.97/59.94 or VFR
-        // recordings. Audio is trimmed to the same timestamps, so the resulting container duration
-        // follows the source timeline instead of a guessed frame rate.
+        // recordings, while keeping audio and video on the same source-time cut manifest.
         var kept = new List<(double start, double end)>();
         var cursor = 0.0;
         foreach (var cut in merged)
@@ -786,34 +788,53 @@ public sealed class FFmpegService
         var includeAudio = media.HasAudio;
         if (!includeVideo && !includeAudio) throw new InvalidOperationException("The source has no usable audio or video stream.");
 
-        // Normalize source timestamps first. For VIDEO, do not split the decoded stream into
-        // dozens (or hundreds) of branches. The old trim+split graph duplicated every decoded
-        // frame into every kept segment, which is exactly the kind of thing that made 80-100 cuts
-        // take forever and hammer memory/CPU. v3.22 drops all cut frames in ONE select pass and
-        // subtracts the cumulative deleted duration from each surviving frame's PTS. This preserves
-        // VFR timing while collapsing every red interval without a giant video split graph.
+        // VIDEO deliberately avoids one giant select/setpts expression. Some Windows FFmpeg
+        // builds reject very large expressions even when they are parenthesized/balanced. Instead,
+        // each cut is its own tiny select filter, followed by tiny timestamp-collapse filters.
+        // All select filters run before any timestamp edits, so `t` always refers to the original
+        // source timeline. The collapse filters then run in ascending cut order using the already-
+        // compressed end timestamp for each cut. This keeps the same exact cut manifest without
+        // a parser-depth/allocation cliff and without fanning decoded video into hundreds of trims.
         if (includeVideo)
         {
-            var rejectTerms = new List<string>(merged.Count);
-            var shiftTerms = new List<string>(merged.Count);
+            var video = new System.Text.StringBuilder("[0:v:0]setpts=PTS-STARTPTS");
             foreach (var cut in merged)
             {
                 var start = cut.start.ToString("0.######", inv);
                 var end = cut.end.ToString("0.######", inv);
-                var removedDuration = (cut.end - cut.start).ToString("0.######", inv);
-                rejectTerms.Add($"gte(t\\,{start})*lt(t\\,{end})");
-                shiftTerms.Add($"gte(PTS*TB\\,{end})*{removedDuration}/TB");
+                video.Append($",select=not(gte(t\\,{start})*lt(t\\,{end}))");
             }
-            var rejectExpression = string.Join("+", rejectTerms);
-            var shiftExpression = string.Join("+", shiftTerms);
-            filters.Add($"[0:v:0]setpts=PTS-STARTPTS,select=not({rejectExpression}),setpts=PTS-({shiftExpression})[outv]");
+
+            var removedBefore = 0.0;
+            foreach (var cut in merged)
+            {
+                var removedDurationValue = cut.end - cut.start;
+                var compressedEnd = (cut.end - removedBefore).ToString("0.######", inv);
+                var removedDuration = removedDurationValue.ToString("0.######", inv);
+                video.Append($",setpts=PTS-gte(PTS*TB\\,{compressedEnd})*{removedDuration}/TB");
+                removedBefore += removedDurationValue;
+            }
+            video.Append("[outv]");
+            filters.Add(video.ToString());
         }
 
         // Audio stays sample-accurate: trim the exact kept ranges, apply the tiny optional edge
         // fades, then concatenate those audio pieces. Audio buffers are tiny compared with decoded
         // video frames, so keeping exact atrim boundaries here is both safe and much lighter than
         // the old split-video graph.
-        if (includeAudio)
+        if (includeAudio && kept.Count > StreamingAudioCutThreshold)
+        {
+            var audio = new System.Text.StringBuilder("[0:a:0]asetpts=PTS-STARTPTS");
+            foreach (var cut in merged)
+            {
+                var start = cut.start.ToString("0.######", inv);
+                var end = cut.end.ToString("0.######", inv);
+                audio.Append($",aselect=not(gte(t\\,{start})*lt(t\\,{end}))");
+            }
+            audio.Append(",asetpts=N/SR/TB[outa]");
+            filters.Add(audio.ToString());
+        }
+        else if (includeAudio)
         {
             if (kept.Count == 1)
                 filters.Add("[0:a:0]asetpts=PTS-STARTPTS[asrc0]");
@@ -856,11 +877,15 @@ public sealed class FFmpegService
         // encode with NVENC. A tiny one-frame capability probe is cached; systems without NVENC
         // automatically keep the software ultrafast path. Final Export keeps its own quality settings.
         var useNvenc = includeVideo && await CanUseNvencAsync(cancellationToken).ConfigureAwait(false);
+
         var psi = CreateProcess(FfmpegPath!);
         psi.ArgumentList.Add("-y");
         psi.ArgumentList.Add("-hide_banner");
         psi.ArgumentList.Add("-i"); psi.ArgumentList.Add(sourcePath);
-        psi.ArgumentList.Add("-filter_complex"); psi.ArgumentList.Add(string.Join(";", filters));
+        // FFmpeg 9 removed -filter_complex_script. Keep the graph inline so the bundled
+        // FFmpeg 9 build used by CutFlow accepts the same large-cut render job.
+        psi.ArgumentList.Add("-filter_complex");
+        psi.ArgumentList.Add(string.Join(";" + Environment.NewLine, filters));
 
         if (includeVideo)
         {
@@ -992,7 +1017,7 @@ public sealed class FFmpegService
         var merged = new List<(double start, double end)>();
         foreach (var cut in cuts)
         {
-            if (merged.Count == 0 || cut.start > merged[^1].end + 0.0005) merged.Add(cut);
+            if (merged.Count == 0 || cut.start > merged[^1].end + PracticalRegionMergeGapSeconds) merged.Add(cut);
             else merged[^1] = (merged[^1].start, Math.Max(merged[^1].end, cut.end));
         }
 

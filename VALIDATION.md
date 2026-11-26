@@ -1,15 +1,16 @@
-# v3.26.0 validation
+# v3.28.0 validation
 
-- Project version: 3.26.0. Project schema stays 54 and detector schema stays 53; this release intentionally does not force a rescan or alter VAD/cut detection.
-- All XAML files parse as XML and every referenced XAML event handler resolves to a C# method.
-- Modified C# files have balanced braces in static checks.
-- Smart Export uses timestamp-normalized video/audio inputs for stream copy and writes to a same-folder staging file before atomic publish.
-- The staged export is probed for zero-ish A/V starts, sane duration, and opening A/V alignment, then the first up-to-2.5 seconds are decoded with FFmpeg `-xerror`.
-- Stream-copy verification failures are handled by the existing fast re-encode fallback instead of publishing a damaged file.
-- Direct same-container file-copy export is staged + atomically moved.
-- Export audio ends with `aresample=async=1:first_pts=0` on the re-encode path to keep timestamps continuous from sample zero.
-- Preview no longer calls Play again from the seek-audio recovery timer and no longer reapplies volume/mute every 1.8 seconds during playback.
-- Normal playback throttles MediaElement.Position polling to roughly 24 Hz unless TEST-cut boundaries require faster polling.
-- Export monitor success remains open and exposes Open in Folder + OK; failure remains visible until OK.
-- Linux-side FFmpeg smoke test confirmed separate video/audio timestamp offsets can be normalized to approximately zero while stream-copying video and re-encoding audio, and the first 2.5 seconds decode cleanly with `-xerror`.
-- Actual Windows WPF/Inno compilation still needs to be performed by `build.bat` on Windows.
+- Project version: 3.28.0. Project schema stays 54 and detector schema stays 53; this release does not force a rescan or change Silero VAD behavior.
+- The large-cut video path contains no multi-range `a+b+c+...` FFmpeg expression. Every cut uses its own small `select` predicate and its own small ordered timestamp-collapse step.
+- The timestamp-collapse thresholds are based on each cut end after all previously removed durations, preserving the intended compressed source timeline.
+- The complete cut graph is written to a temporary UTF-8 filter script and passed with `-filter_complex_script`, avoiding the Windows command-line size limit for large jobs.
+- The temporary filter script is removed in a `finally` block on success, FFmpeg failure, cancellation, or timeout.
+- Linux-side FFmpeg smoke test: 120 cut ranges on a 30-second A/V file completed successfully with the new filter chain; expected duration 20.400s and output container duration 20.400s.
+- Linux-side FFmpeg stress test: 250 cut ranges produced a 44,748-character filter graph and completed successfully through `-filter_complex_script`; expected duration 42.500s and output duration 42.500s.
+- The 250-range test demonstrates that a graph larger than the Windows command-line limit is no longer passed through the process command line.
+- Existing audio kept-range trimming/concatenation remains unchanged and is still generated from the same merged cut manifest as video.
+- Existing worker post-render duration and A/V-alignment validation remains enabled before a cut result can be accepted.
+- Main-window and error-dialog titles show the assembly version so a stale installed executable can be identified from a screenshot.
+- `build.bat` still refuses to build when the README first line does not match the version in `CutFlow.csproj`.
+- Static checks verify balanced braces, valid XAML XML, and matching referenced event-handler names.
+- Actual Windows WPF/Inno compilation must be performed by `build.bat` on Windows because this validation environment does not contain the .NET SDK/Windows WPF toolchain.

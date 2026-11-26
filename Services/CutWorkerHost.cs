@@ -268,6 +268,8 @@ public sealed class CutWorkerHost : IDisposable
 
 internal static class CutWorkerEngine
 {
+    private const double PracticalRegionMergeGapSeconds = 0.08;
+
     public static async Task RunAsync(RenderWorkerJob job, CancellationToken cancellationToken)
     {
         var started = DateTime.UtcNow;
@@ -510,7 +512,7 @@ internal static class CutWorkerEngine
         var merged = new List<(double start, double end)>();
         foreach (var r in sorted)
         {
-            if (merged.Count == 0 || r.start > merged[^1].end + 0.018) merged.Add(r);
+            if (merged.Count == 0 || r.start > merged[^1].end + PracticalRegionMergeGapSeconds) merged.Add(r);
             else merged[^1] = (merged[^1].start, Math.Max(merged[^1].end, r.end));
         }
         return merged;

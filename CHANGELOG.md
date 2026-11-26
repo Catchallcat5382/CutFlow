@@ -1,5 +1,20 @@
 # CutFlow changelog
 
+## 3.28.0 — large Cut All parser/command-line hardening
+- Removed the giant multi-range FFmpeg `select` expression entirely. Every video cut is now a small `select` filter step instead of one parser-heavy sum expression.
+- Replaced the giant timestamp-shift sum with small ordered `setpts` steps using compressed cut-end timestamps.
+- Moved the complete cut filter graph into a short-lived UTF-8 `-filter_complex_script` file so large projects do not hit the Windows process command-line length limit.
+- The temporary filter script is cleaned up on both success and failure.
+- Preserved exact audio kept-range trimming/concatenation and the existing post-render duration/A/V integrity checks.
+- Main-window and error-dialog titles now expose the running CutFlow version, making stale installations obvious during testing.
+
+## 3.27.0 — large Cut All parser fix
+- Fixed Cut All failing before render with FFmpeg `Parsed_select` / `Error while parsing expression` errors when a project contained many cut regions.
+- Rebuilt the large video `select`/`setpts` sums as balanced expression trees, avoiding FFmpeg expression-parser exhaustion without bringing back the old split-video memory cost.
+- The actual cut predicates and timestamp-collapse math are unchanged, so the existing cut manifest and VFR-friendly timing behavior are preserved.
+- Added a build-time README version check so a stale `README.md` cannot silently ship after the application version changes.
+- Detector behavior, project schemas, Smart Export, and the v3.26 playback/export integrity fixes are unchanged.
+
 ## 3.26.0 — export startup integrity + playback/audio stability
 - Smart Export now normalizes video/audio stream start timestamps before stream-copy remuxing, preventing MP4/MOV edit-list offsets from surfacing as a broken first second.
 - Fast exports render to a same-folder staging file, decode-check the opening seconds, verify A/V start alignment/duration, then atomically publish the destination. Unsafe stream-copy results automatically fall back to the fast NVENC/ultrafast encode path.
